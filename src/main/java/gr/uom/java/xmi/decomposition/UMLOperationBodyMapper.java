@@ -35,6 +35,7 @@ import gr.uom.java.xmi.diff.UMLAnonymousClassDiff;
 import gr.uom.java.xmi.diff.UMLClassBaseDiff;
 import gr.uom.java.xmi.diff.AddParameterRefactoring;
 import gr.uom.java.xmi.diff.AddVariableTypeAnnotationRefactoring;
+import gr.uom.java.xmi.diff.ChangeVariableTypeAnnotationRefactoring;
 import gr.uom.java.xmi.diff.AssertThrowsRefactoring;
 import gr.uom.java.xmi.diff.AssertTimeoutRefactoring;
 import gr.uom.java.xmi.diff.AssertionRefactoring;
@@ -4408,6 +4409,25 @@ public class UMLOperationBodyMapper implements Comparable<UMLOperationBodyMapper
 		if(PathFileUtils.isPythonFile(container1.getLocationInfo().getFilePath()) && container2 != null) {
 			List<VariableDeclaration> vars1 = container1.getAllVariableDeclarations();
 			List<VariableDeclaration> vars2 = container2.getAllVariableDeclarations();
+			Set<String> changedProcessedNames = new LinkedHashSet<>();
+			for(VariableDeclaration vd1 : vars1) {
+				if(vd1.isAttribute() || vd1.isParameter()) continue;
+				boolean before_typed = vd1.getModifiers().stream().anyMatch(m -> "typed".equals(m.getKeyword()));
+				if(!before_typed) continue;
+				String varName = vd1.getVariableName();
+				if(changedProcessedNames.contains(varName)) continue;
+				for(VariableDeclaration vd2 : vars2) {
+					if(vd2.isAttribute() || vd2.isParameter()) continue;
+					if(varName.equals(vd2.getVariableName())) {
+						boolean after_typed = vd2.getModifiers().stream().anyMatch(m -> "typed".equals(m.getKeyword()));
+						if(after_typed && !vd1.getType().equals(vd2.getType())) {
+							refactorings.add(new ChangeVariableTypeAnnotationRefactoring(vd1, vd2, container1, container2));
+							changedProcessedNames.add(varName);
+							break;
+						}
+					}
+				}
+			}
 			Set<String> processedNames = new LinkedHashSet<>();
 			for(VariableDeclaration vd1 : vars1) {
 				if(vd1.isAttribute() || vd1.isParameter()) continue;

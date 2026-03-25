@@ -315,6 +315,15 @@ public class UMLAttributeDiff implements UMLDocumentationDiffProvider {
 		refactorings.addAll(getModifierRefactorings());
 		refactorings.addAll(getAnnotationRefactorings());
 		if(PathFileUtils.isPythonFile(removedAttribute.getLocationInfo().getFilePath())) {
+			if(removedAttribute.hasExplicitTypeAnnotation() && addedAttribute.hasExplicitTypeAnnotation()
+					&& !removedAttribute.getType().equals(addedAttribute.getType())) {
+				ChangeVariableTypeAnnotationRefactoring ref = new ChangeVariableTypeAnnotationRefactoring(
+						removedAttribute.getVariableDeclaration(),
+						addedAttribute.getVariableDeclaration(),
+						removedAttribute,
+						addedAttribute);
+				refactorings.add(ref);
+			}
 			if(!removedAttribute.hasExplicitTypeAnnotation() && addedAttribute.hasExplicitTypeAnnotation()) {
 				AddVariableTypeAnnotationRefactoring ref = new AddVariableTypeAnnotationRefactoring(
 						RefactoringType.ADD_VARIABLE_TYPE_ANNOTATION,

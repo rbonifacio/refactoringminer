@@ -486,6 +486,37 @@ public class UMLOperationDiff {
 			if(PathFileUtils.isPythonFile(removed.getLocationInfo().getFilePath())) {
 				for(UMLParameter removedParam : removed.getParameters()) {
 					if(removedParam.getKind().equals("return")) continue;
+					if(!removedParam.hasTypeAnnotation()) continue;
+					for(UMLParameter addedParam : added.getParameters()) {
+						if(addedParam.getKind().equals("return")) continue;
+						if(removedParam.getName().equals(addedParam.getName()) && addedParam.hasTypeAnnotation()
+								&& !removedParam.getType().equals(addedParam.getType())) {
+							ChangeTypeAnnotationRefactoring refactoring = new ChangeTypeAnnotationRefactoring(
+									RefactoringType.CHANGE_PARAMETER_TYPE_ANNOTATION,
+									removedParam.getType().toString(),
+									addedParam.getType().toString(),
+									removedParam.getName(),
+									removed, added);
+							refactorings.add(refactoring);
+							break;
+						}
+					}
+				}
+				if(removed.hasExplicitReturnTypeAnnotation() && added.hasExplicitReturnTypeAnnotation()) {
+					String returnTypeBefore = removed.getReturnParameter() != null ? removed.getReturnParameter().getType().toString() : "";
+					String returnTypeAfter = added.getReturnParameter() != null ? added.getReturnParameter().getType().toString() : "";
+					if(!returnTypeBefore.equals(returnTypeAfter)) {
+						ChangeTypeAnnotationRefactoring refactoring = new ChangeTypeAnnotationRefactoring(
+								RefactoringType.CHANGE_RETURN_TYPE_ANNOTATION,
+								returnTypeBefore,
+								returnTypeAfter,
+								null,
+								removed, added);
+						refactorings.add(refactoring);
+					}
+				}
+				for(UMLParameter removedParam : removed.getParameters()) {
+					if(removedParam.getKind().equals("return")) continue;
 					if(removedParam.hasTypeAnnotation()) continue;
 					for(UMLParameter addedParam : added.getParameters()) {
 						if(addedParam.getKind().equals("return")) continue;
