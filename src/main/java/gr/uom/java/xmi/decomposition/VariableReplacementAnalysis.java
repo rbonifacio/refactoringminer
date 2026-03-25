@@ -15,6 +15,7 @@ import java.util.Set;
 import org.apache.commons.lang3.tuple.Pair;
 import org.refactoringminer.api.Refactoring;
 import org.refactoringminer.api.RefactoringMinerTimedOutException;
+import org.refactoringminer.api.RefactoringType;
 import org.refactoringminer.util.PrefixSuffixUtils;
 
 import gr.uom.java.xmi.UMLOperation;
@@ -37,6 +38,8 @@ import gr.uom.java.xmi.decomposition.replacement.VariableReplacementWithMethodIn
 import gr.uom.java.xmi.decomposition.replacement.Replacement.ReplacementType;
 import gr.uom.java.xmi.decomposition.replacement.SplitVariableReplacement;
 import gr.uom.java.xmi.diff.AddVariableAnnotationRefactoring;
+import gr.uom.java.xmi.diff.AddVariableTypeAnnotationRefactoring;
+import gr.uom.java.xmi.UMLModifier;
 import gr.uom.java.xmi.diff.AddVariableModifierRefactoring;
 import gr.uom.java.xmi.diff.CandidateAttributeRefactoring;
 import gr.uom.java.xmi.diff.CandidateMergeVariableRefactoring;
@@ -2220,6 +2223,16 @@ public class VariableReplacementAnalysis {
 			}
 			else if(variableDeclaration1.isFinal()) {
 				RemoveVariableModifierRefactoring refactoring = new RemoveVariableModifierRefactoring("final", variableDeclaration1, variableDeclaration2, operation1, operation2, insideExtractedOrInlinedMethod);
+				refactorings.add(refactoring);
+			}
+		}
+		if((LANG1.equals(Constants.PYTHON) || LANG2.equals(Constants.PYTHON)) && !variableDeclaration1.isAttribute() && !variableDeclaration2.isAttribute()) {
+			boolean before_typed = variableDeclaration1.getModifiers().stream().anyMatch(m -> "typed".equals(m.getKeyword()));
+			boolean after_typed = variableDeclaration2.getModifiers().stream().anyMatch(m -> "typed".equals(m.getKeyword()));
+			if(!before_typed && after_typed) {
+				AddVariableTypeAnnotationRefactoring refactoring = new AddVariableTypeAnnotationRefactoring(
+						RefactoringType.ADD_VARIABLE_TYPE_ANNOTATION,
+						variableDeclaration1, variableDeclaration2, operation1, operation2);
 				refactorings.add(refactoring);
 			}
 		}

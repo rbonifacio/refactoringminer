@@ -26,6 +26,7 @@ public class LangMethodDeclaration extends LangDeclaration {
     private boolean isSynchronized;
     private boolean isAsync;
     private String returnTypeAnnotation;
+    private boolean hasExplicitReturnTypeAnnotation;
     private List<LangAnnotation> langAnnotations = new ArrayList<>();
     private List<LangComment> comments = new ArrayList<>();
 
@@ -138,6 +139,14 @@ public class LangMethodDeclaration extends LangDeclaration {
 
     public void setReturnTypeAnnotation(String returnTypeAnnotation) {
         this.returnTypeAnnotation = returnTypeAnnotation;
+    }
+
+    public boolean hasExplicitReturnTypeAnnotation() {
+        return hasExplicitReturnTypeAnnotation;
+    }
+
+    public void setHasExplicitReturnTypeAnnotation(boolean hasExplicitReturnTypeAnnotation) {
+        this.hasExplicitReturnTypeAnnotation = hasExplicitReturnTypeAnnotation;
     }
 
     public String getCleanName() {

@@ -62,6 +62,7 @@ public class UMLOperation implements Comparable<UMLOperation>, Serializable, Var
 	private List<UMLOperation> nestedOperations;
 	private final Constants LANG;
 	private boolean importsTestCase;
+	private boolean hasExplicitReturnTypeAnnotation;
 	private Optional<UMLType> receiver;
 	
 	public UMLOperation(String name, LocationInfo locationInfo, String className) {
@@ -286,6 +287,14 @@ public class UMLOperation implements Comparable<UMLOperation>, Serializable, Var
 
 	public void setImportsTestCase(boolean importsTestCase) {
 		this.importsTestCase = importsTestCase;
+	}
+
+	public boolean hasExplicitReturnTypeAnnotation() {
+		return hasExplicitReturnTypeAnnotation;
+	}
+
+	public void setHasExplicitReturnTypeAnnotation(boolean hasExplicitReturnTypeAnnotation) {
+		this.hasExplicitReturnTypeAnnotation = hasExplicitReturnTypeAnnotation;
 	}
 
 	public AbstractExpression getDefaultExpression() {

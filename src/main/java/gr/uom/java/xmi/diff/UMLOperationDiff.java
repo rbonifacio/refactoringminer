@@ -28,6 +28,8 @@ import java.util.Set;
 
 import org.apache.commons.lang3.tuple.Pair;
 import org.refactoringminer.api.Refactoring;
+import org.refactoringminer.api.RefactoringType;
+import org.refactoringminer.util.PathFileUtils;
 
 public class UMLOperationDiff {
 	private VariableDeclarationContainer removedOperation;
@@ -481,6 +483,58 @@ public class UMLOperationDiff {
 		if(removedOperation instanceof UMLOperation && addedOperation instanceof UMLOperation) {
 			UMLOperation removed = (UMLOperation)removedOperation;
 			UMLOperation added = (UMLOperation)addedOperation;
+			if(PathFileUtils.isPythonFile(removed.getLocationInfo().getFilePath())) {
+				for(UMLParameter removedParam : removed.getParameters()) {
+					if(removedParam.getKind().equals("return")) continue;
+					if(removedParam.hasTypeAnnotation()) continue;
+					for(UMLParameter addedParam : added.getParameters()) {
+						if(addedParam.getKind().equals("return")) continue;
+						if(removedParam.getName().equals(addedParam.getName()) && addedParam.hasTypeAnnotation()) {
+							AddTypeAnnotationRefactoring refactoring = new AddTypeAnnotationRefactoring(
+									RefactoringType.ADD_PARAMETER_TYPE_ANNOTATION,
+									addedParam.getType().toString(),
+									addedParam.getName(),
+									removed, added);
+							refactorings.add(refactoring);
+							break;
+						}
+					}
+				}
+				for(UMLParameter removedParam : removed.getParameters()) {
+					if(removedParam.getKind().equals("return")) continue;
+					if(!removedParam.hasTypeAnnotation()) continue;
+					for(UMLParameter addedParam : added.getParameters()) {
+						if(addedParam.getKind().equals("return")) continue;
+						if(removedParam.getName().equals(addedParam.getName()) && !addedParam.hasTypeAnnotation()) {
+							AddTypeAnnotationRefactoring refactoring = new AddTypeAnnotationRefactoring(
+									RefactoringType.REMOVE_PARAMETER_TYPE_ANNOTATION,
+									removedParam.getType().toString(),
+									removedParam.getName(),
+									removed, added);
+							refactorings.add(refactoring);
+							break;
+						}
+					}
+				}
+				if(!removed.hasExplicitReturnTypeAnnotation() && added.hasExplicitReturnTypeAnnotation()) {
+					String returnType = added.getReturnParameter() != null ? added.getReturnParameter().getType().toString() : "";
+					AddTypeAnnotationRefactoring refactoring = new AddTypeAnnotationRefactoring(
+							RefactoringType.ADD_RETURN_TYPE_ANNOTATION,
+							returnType,
+							null,
+							removed, added);
+					refactorings.add(refactoring);
+				}
+				if(removed.hasExplicitReturnTypeAnnotation() && !added.hasExplicitReturnTypeAnnotation()) {
+					String returnType = removed.getReturnParameter() != null ? removed.getReturnParameter().getType().toString() : "";
+					AddTypeAnnotationRefactoring refactoring = new AddTypeAnnotationRefactoring(
+							RefactoringType.REMOVE_RETURN_TYPE_ANNOTATION,
+							returnType,
+							null,
+							removed, added);
+					refactorings.add(refactoring);
+				}
+			}
 			for(UMLType exceptionType : addedExceptionTypes) {
 				AddThrownExceptionTypeRefactoring refactoring = new AddThrownExceptionTypeRefactoring(exceptionType, removedOperation, addedOperation);
 				refactorings.add(refactoring);

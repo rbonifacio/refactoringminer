@@ -107,17 +107,19 @@ public class VariableDeclaration implements LocationInfoProvider, VariableDeclar
 							   LangSingleVariableDeclaration param, VariableDeclarationContainer container, Map<String, Set<VariableDeclaration>> activeVariableDeclarations, String fileContent) {
 		this.variableName = param.getLangSimpleName().getIdentifier();
 
-		// Extract type from parameter
-		if (param.hasTypeAnnotation() && param.getTypeAnnotation() != null) {
-			this.type = UMLType.extractTypeObject(param.getTypeAnnotation().getName());
-		} else {
-			this.type = UMLType.extractTypeObject("Object"); // Default for untyped Python parameters
-		}
-
 		this.varargsParameter = param.isVarArgs();
 		this.locationInfo = new LocationInfo(cu, sourceFolder, filePath, param,
 				LocationInfo.CodeElementType.SINGLE_VARIABLE_DECLARATION);
 		this.LANG = PathFileUtils.getLang(locationInfo.getFilePath());
+
+		// Extract type from parameter
+		if (param.hasTypeAnnotation() && param.getTypeAnnotation() != null) {
+			this.type = UMLType.extractTypeObject(param.getTypeAnnotation().getName());
+		} else if (param.hasTypeAnnotation() && param.getRawTypeAnnotationText() != null) {
+			this.type = UMLType.extractTypeObject(param.getRawTypeAnnotationText(), "[", "]", locationInfo);
+		} else {
+			this.type = UMLType.extractTypeObject("Object"); // Default for untyped Python parameters
+		}
 
 		// Extract annotations and modifiers using existing processors
 		List<LangAnnotation> langAnnotations = param.getAnnotations();

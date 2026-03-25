@@ -33,6 +33,7 @@ public class UMLAttribute implements Comparable<UMLAttribute>, Serializable, Var
 	private boolean isStatic;
 	private boolean isTransient;
 	private boolean isVolatile;
+	private boolean hasExplicitTypeAnnotation;
 	private Optional<UMLAnonymousClass> anonymousClassContainer;
 	private VariableDeclaration variableDeclaration;
 	private List<UMLAnonymousClass> anonymousClassList;
@@ -283,6 +284,14 @@ public class UMLAttribute implements Comparable<UMLAttribute>, Serializable, Var
 
 	public void setFinal(boolean isFinal) {
 		this.isFinal = isFinal;
+	}
+
+	public boolean hasExplicitTypeAnnotation() {
+		return hasExplicitTypeAnnotation;
+	}
+
+	public void setHasExplicitTypeAnnotation(boolean hasExplicitTypeAnnotation) {
+		this.hasExplicitTypeAnnotation = hasExplicitTypeAnnotation;
 	}
 
 	public boolean isStatic() {

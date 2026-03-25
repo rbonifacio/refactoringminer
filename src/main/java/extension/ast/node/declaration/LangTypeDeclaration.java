@@ -18,6 +18,7 @@ public class LangTypeDeclaration extends LangDeclaration {
     private String name;
     private List<LangMethodDeclaration> methods = new ArrayList<>();
     private List<LangAssignment> classLevelAssignments = new ArrayList<>();
+    private List<LangSingleVariableDeclaration> annotatedClassVariables = new ArrayList<>();
     private List<LangASTNode> statements = new ArrayList<>();
     private List<LangSimpleName> superClassNames = new ArrayList<>();
     private Visibility visibility;
@@ -70,6 +71,15 @@ public class LangTypeDeclaration extends LangDeclaration {
     public void addAssignment(LangAssignment assignment) {
         classLevelAssignments.add(assignment);
         addChild(assignment);
+    }
+
+    public void addAnnotatedVariable(LangSingleVariableDeclaration svd) {
+        annotatedClassVariables.add(svd);
+        addChild(svd);
+    }
+
+    public List<LangSingleVariableDeclaration> getAnnotatedClassVariables() {
+        return annotatedClassVariables;
     }
 
     public void addComment(LangComment comment) {

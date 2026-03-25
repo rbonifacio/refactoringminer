@@ -89,6 +89,8 @@ public class PyDeclarationASTBuilder extends PyBaseASTBuilder {
                     typeDeclaration.addMethod((LangMethodDeclaration) statement);
                 } else if (statement instanceof LangComment) {
                     typeDeclaration.addComment((LangComment) statement);
+                } else if (statement instanceof LangExpressionStatement exprStmt && exprStmt.getExpression() instanceof LangSingleVariableDeclaration svd) {
+                    typeDeclaration.addAnnotatedVariable(svd);
                 } else if (statement instanceof LangExpressionStatement exprStmt && exprStmt.getExpression() instanceof LangAssignment assignment) {
                     typeDeclaration.addAssignment(assignment);
                 } else {
@@ -200,6 +202,7 @@ public class PyDeclarationASTBuilder extends PyBaseASTBuilder {
 
         if (ctx.expression() != null) {
             methodDeclaration.setReturnTypeAnnotation(ctx.expression().getText());
+            methodDeclaration.setHasExplicitReturnTypeAnnotation(true);
         } else {
             boolean hasReturn = false;
             if (body != null && body.getStatements() != null) {
@@ -286,7 +289,10 @@ public class PyDeclarationASTBuilder extends PyBaseASTBuilder {
         decl.setVarArgs(isStar);
         decl.setKwArgs(isDoubleStar);
         if (paramContext.annotation() != null) {
-            decl.setTypeAnnotation(TypeObjectEnum.fromType(paramContext.annotation().expression().getText()));
+            String rawType = paramContext.annotation().expression().getText();
+            decl.setTypeAnnotation(TypeObjectEnum.fromType(rawType));
+            decl.setRawTypeAnnotationText(rawType);
+            decl.setHasTypeAnnotation(true);
         }
         return decl;
     }

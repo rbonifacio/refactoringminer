@@ -9,6 +9,7 @@ import java.util.function.Function;
 
 import org.refactoringminer.api.Refactoring;
 import org.refactoringminer.api.RefactoringMinerTimedOutException;
+import org.refactoringminer.api.RefactoringType;
 import org.refactoringminer.util.PathFileUtils;
 
 import gr.uom.java.xmi.Constants;
@@ -313,6 +314,26 @@ public class UMLAttributeDiff implements UMLDocumentationDiffProvider {
 		}
 		refactorings.addAll(getModifierRefactorings());
 		refactorings.addAll(getAnnotationRefactorings());
+		if(PathFileUtils.isPythonFile(removedAttribute.getLocationInfo().getFilePath())) {
+			if(!removedAttribute.hasExplicitTypeAnnotation() && addedAttribute.hasExplicitTypeAnnotation()) {
+				AddVariableTypeAnnotationRefactoring ref = new AddVariableTypeAnnotationRefactoring(
+						RefactoringType.ADD_VARIABLE_TYPE_ANNOTATION,
+						removedAttribute.getVariableDeclaration(),
+						addedAttribute.getVariableDeclaration(),
+						removedAttribute,
+						addedAttribute);
+				refactorings.add(ref);
+			}
+			if(removedAttribute.hasExplicitTypeAnnotation() && !addedAttribute.hasExplicitTypeAnnotation()) {
+				AddVariableTypeAnnotationRefactoring ref = new AddVariableTypeAnnotationRefactoring(
+						RefactoringType.REMOVE_VARIABLE_TYPE_ANNOTATION,
+						removedAttribute.getVariableDeclaration(),
+						addedAttribute.getVariableDeclaration(),
+						removedAttribute,
+						addedAttribute);
+				refactorings.add(ref);
+			}
+		}
 		if(mapper != null) {
 			refactorings.addAll(mapper.getRefactorings());
 		}

@@ -12,6 +12,7 @@ public class UMLParameter implements Serializable, VariableDeclarationProvider {
 	private UMLType type;
 	private String kind;
 	private boolean varargs;
+	private boolean hasTypeAnnotation;
 	private VariableDeclaration variableDeclaration;
 
 	public UMLParameter(String name, UMLType type, String kind, boolean varargs) {
@@ -43,6 +44,14 @@ public class UMLParameter implements Serializable, VariableDeclarationProvider {
 
 	public boolean isVarargs() {
 		return varargs;
+	}
+
+	public boolean hasTypeAnnotation() {
+		return hasTypeAnnotation;
+	}
+
+	public void setHasTypeAnnotation(boolean hasTypeAnnotation) {
+		this.hasTypeAnnotation = hasTypeAnnotation;
 	}
 
 	public boolean isFinal() {

@@ -94,6 +94,14 @@ public class PyASTFlattener implements LangASTFlattener {
     @Override
     public void visit(LangSingleVariableDeclaration var) {
         var.getLangSimpleName().accept(this);
+        if (var.hasTypeAnnotation() && var.getRawTypeAnnotationText() != null) {
+            builder.append(":");
+            builder.append(var.getRawTypeAnnotationText());
+        }
+        if (var.getDefaultValue() != null) {
+            builder.append("=");
+            var.getDefaultValue().accept(this);
+        }
     }
 
     @Override

@@ -4,10 +4,12 @@ import extension.ast.builder.python.PyASTBuilder;
 import extension.ast.builder.python.PyASTBuilderUtil;
 import extension.ast.node.LangASTNode;
 import extension.ast.node.LangASTNodeFactory;
+import extension.ast.node.declaration.LangSingleVariableDeclaration;
 import extension.ast.node.expression.*;
 import extension.ast.node.literal.LangDictionaryLiteral;
 import extension.ast.node.literal.LangStringLiteral;
 import extension.ast.node.literal.LangTupleLiteral;
+import extension.ast.node.TypeObjectEnum;
 import extension.base.lang.python.PythonParser;
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.antlr.v4.runtime.tree.ParseTree;
@@ -184,13 +186,37 @@ public class PyExpressionASTBuilder extends PyBaseASTBuilder {
     public LangASTNode visitAssignment(PythonParser.AssignmentContext ctx) {
 
         if (ctx.COLON() != null) {
-            if (ctx.name() != null) {
-                return LangASTNodeFactory.createSimpleName(ctx.name().getText(), ctx.name());
-            } else {
-                if (ctx.single_target() != null) {
-                    return mainBuilder.visit(ctx.single_target());
+            // Annotated assignment: `name: type = value` or stand-alone annotation: `name: type`
+            if (ctx.annotated_rhs() != null) {
+                // Has a value — build a LangSingleVariableDeclaration to preserve the type annotation
+                String rawType = ctx.expression() != null ? ctx.expression().getText() : null;
+                LangASTNode defaultValue = mainBuilder.visit(ctx.annotated_rhs());
+                LangSingleVariableDeclaration decl;
+                if (ctx.name() != null) {
+                    decl = LangASTNodeFactory.createSingleVariableDeclaration(ctx.name().getText(), defaultValue, ctx);
+                } else if (ctx.single_target() != null) {
+                    String varName = ctx.single_target().getText();
+                    decl = LangASTNodeFactory.createSingleVariableDeclaration(varName, defaultValue, ctx);
                 } else {
-                    return mainBuilder.visit(ctx.single_subscript_attribute_target());
+                    decl = LangASTNodeFactory.createSingleVariableDeclaration(
+                            ctx.single_subscript_attribute_target().getText(), defaultValue, ctx);
+                }
+                if (rawType != null) {
+                    decl.setHasTypeAnnotation(true);
+                    decl.setRawTypeAnnotationText(rawType);
+                    decl.setTypeAnnotation(TypeObjectEnum.fromType(rawType));
+                }
+                return decl;
+            } else {
+                // Stand-alone annotation (`x: int` with no value) — keep existing behaviour
+                if (ctx.name() != null) {
+                    return LangASTNodeFactory.createSimpleName(ctx.name().getText(), ctx.name());
+                } else {
+                    if (ctx.single_target() != null) {
+                        return mainBuilder.visit(ctx.single_target());
+                    } else {
+                        return mainBuilder.visit(ctx.single_subscript_attribute_target());
+                    }
                 }
             }
         }

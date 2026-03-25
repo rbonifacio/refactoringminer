@@ -279,6 +279,10 @@ public class UMLModelAdapter {
         for (LangAssignment classLevelAssignment: typeDecl.getClassLevelAssignments()){
             processClassLevelAssignmentForAttribute(umlClass, classLevelAssignment, sourceFolder, filepath, fileContent);
         }
+        // Handle annotated class-scope variables (x: int = 0) as attributes with type annotation
+        for (LangSingleVariableDeclaration svd : typeDecl.getAnnotatedClassVariables()) {
+            processAnnotatedClassLevelVariableForAttribute(umlClass, svd, sourceFolder, filepath, fileContent);
+        }
         for (LangComment classLevelComment: typeDecl.getComments()) {
             UMLComment comment = createUMLComment(classLevelComment, typeDecl.getRootCompilationUnit(), sourceFolder, filepath);
             if (comment != null)
@@ -356,6 +360,8 @@ public class UMLModelAdapter {
             if (LangSupportedEnum.PYTHON.equals(language)) {
                 if (param.getTypeAnnotation() != null) {
                     typeObject = UMLType.extractTypeObject(param.getTypeAnnotation().getName(), "[", "]", paramLocationInfo);
+                } else if (param.getRawTypeAnnotationText() != null) {
+                    typeObject = UMLType.extractTypeObject(param.getRawTypeAnnotationText(), "[", "]", paramLocationInfo);
                 }
             } else {
                 if (param.getTypeAnnotation() != null) {
@@ -367,6 +373,9 @@ public class UMLModelAdapter {
             }
 
             UMLParameter umlParam = new UMLParameter(param.getLangSimpleName().getIdentifier(), typeObject, "in", param.isVarArgs());
+            if (LangSupportedEnum.PYTHON.equals(language)) {
+                umlParam.setHasTypeAnnotation(param.hasTypeAnnotation());
+            }
             processVariableDeclarations(param, umlParam, typeObject, sourceFolder, filePath, umlOperation, fileContent);
             umlOperation.addParameter(umlParam);
             parameterNames.add(param.getLangSimpleName().getIdentifier());
@@ -400,6 +409,9 @@ public class UMLModelAdapter {
         if (!(TypeObjectEnum.VOID.name().equals(returnTypeString))) {
             UMLParameter returnParam = new UMLParameter("", returnType, "return", false);
             umlOperation.addParameter(returnParam);
+        }
+        if (LangSupportedEnum.PYTHON.equals(language)) {
+            umlOperation.setHasExplicitReturnTypeAnnotation(methodDecl.hasExplicitReturnTypeAnnotation());
         }
 
 
@@ -562,6 +574,44 @@ public class UMLModelAdapter {
 
             typeDeclaration.addAttribute(attribute);
         }
+    }
+
+    private static void processAnnotatedClassLevelVariableForAttribute(UMLClass typeDeclaration, LangSingleVariableDeclaration svd,
+                                                String sourceFolder, String filePath, String fileContent) {
+        if (svd.getLangSimpleName() == null) return;
+        String attributeName = svd.getLangSimpleName().getIdentifier();
+        String rawType = svd.getRawTypeAnnotationText();
+        UMLType umlType = (rawType != null)
+                ? UMLType.extractTypeObject(rawType, "[", "]",
+                        new LocationInfo(svd.getRootCompilationUnit(), sourceFolder, filePath, svd, LocationInfo.CodeElementType.FIELD_DECLARATION))
+                : UMLType.extractTypeObject("Object");
+
+        LocationInfo attributeLocationInfo = new LocationInfo(
+                svd.getRootCompilationUnit(),
+                sourceFolder,
+                filePath,
+                svd,
+                LocationInfo.CodeElementType.FIELD_DECLARATION
+        );
+        UMLAttribute attribute = new UMLAttribute(attributeName, umlType, attributeLocationInfo, typeDeclaration.getName());
+        attribute.setHasExplicitTypeAnnotation(true);
+        attribute.setVisibility(Visibility.PUBLIC);
+        attribute.setFinal(false);
+        attribute.setStatic(false);
+
+        // Build a VariableDeclaration from the LangSingleVariableDeclaration
+        VariableDeclaration variableDeclaration = new VariableDeclaration(
+                svd.getRootCompilationUnit(),
+                sourceFolder,
+                filePath,
+                svd,
+                attribute,
+                Collections.emptyMap(),
+                fileContent
+        );
+        variableDeclaration.setAttribute(true);
+        attribute.setVariableDeclaration(variableDeclaration);
+        typeDeclaration.addAttribute(attribute);
     }
 
     private static void processComments(LangMethodDeclaration methodDecl, String sourceFolder, String filePath, UMLOperation umlOperation){
