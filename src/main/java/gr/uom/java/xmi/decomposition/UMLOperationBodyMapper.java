@@ -58,6 +58,8 @@ import gr.uom.java.xmi.diff.ReferenceBasedRefactoring;
 import gr.uom.java.xmi.diff.RemoveParameterRefactoring;
 import gr.uom.java.xmi.diff.RenameVariableRefactoring;
 import gr.uom.java.xmi.diff.ReplaceAnonymousWithLambdaRefactoring;
+import gr.uom.java.xmi.diff.ReplaceConditionalWithPatternMatchingRefactoring;
+import gr.uom.java.xmi.diff.ReplacePatternMatchingWithConditionalRefactoring;
 import gr.uom.java.xmi.diff.ReplaceLoopWithPipelineRefactoring;
 import gr.uom.java.xmi.diff.ReplacePipelineWithLoopRefactoring;
 import gr.uom.java.xmi.diff.SplitConditionalRefactoring;
@@ -913,7 +915,10 @@ public class UMLOperationBodyMapper implements Comparable<UMLOperationBodyMapper
 			else if(streamAPIStatements1.size() == 1 && streamAPIStatements2.size() == 1 && nestedLambdas1.size() != nestedLambdas2.size()) {
 				processStreamAPIStatements(leaves1, leaves2, innerNodes1, streamAPIStatements2);
 			}
-			
+
+			detectIfToPatternMatch(innerNodes1, innerNodes2);
+			detectPatternMatchToIf(innerNodes1, innerNodes2);
+
 			for(Refactoring r : this.refactorings) {
 				if(r instanceof ReplaceLoopWithPipelineRefactoring) {
 					ReplaceLoopWithPipelineRefactoring refactoring = (ReplaceLoopWithPipelineRefactoring)r;
@@ -2094,16 +2099,19 @@ public class UMLOperationBodyMapper implements Comparable<UMLOperationBodyMapper
 		if(this.anonymousClassDiffs.size() > anonymousMappers && parentMapper != null) {
 			parentMapper.anonymousClassDiffs.addAll(this.anonymousClassDiffs);
 		}
-		
+
 		processInnerNodes(innerNodes1, innerNodes2, leaves1, leaves2, new LinkedHashMap<String, String>(), containsCallToExtractedMethod(leaves2));
-		
+
 		if(streamAPIStatements1.size() == 0 && streamAPIStatements2.size() > 0) {
 			processStreamAPIStatements(leaves1, leaves2, innerNodes1, streamAPIStatements2);
 		}
 		else if(streamAPIStatements1.size() > 0 && streamAPIStatements2.size() == 0) {
 			processStreamAPIStatements(leaves1, leaves2, streamAPIStatements1, innerNodes2);
 		}
-		
+
+		detectIfToPatternMatch(innerNodes1, innerNodes2);
+		detectPatternMatchToIf(innerNodes1, innerNodes2);
+
 		updateNonMappedLeavesT1(leaves1);
 		updateNonMappedLeavesT2(leaves2);
 		nonMappedInnerNodesT1.addAll(innerNodes1);
@@ -2114,6 +2122,102 @@ public class UMLOperationBodyMapper implements Comparable<UMLOperationBodyMapper
 		}
 		for(AbstractCodeFragment statement : getNonMappedLeavesT1()) {
 			inlinedVariableAssignment(statement, nonMappedLeavesT2);
+		}
+	}
+
+	private void detectIfToPatternMatch(List<CompositeStatementObject> innerNodes1, List<CompositeStatementObject> innerNodes2) {
+		if(!container1.getLocationInfo().getFilePath().endsWith(".py")) {
+			return;
+		}
+		for(ListIterator<CompositeStatementObject> it1 = innerNodes1.listIterator(); it1.hasNext();) {
+			CompositeStatementObject node1 = it1.next();
+			if(!node1.getLocationInfo().getCodeElementType().equals(CodeElementType.IF_STATEMENT)) {
+				continue;
+			}
+			// Only consider outermost if-statements (parent is not another if-statement)
+			CompositeStatementObject parent1 = node1.getParent();
+			if(parent1 != null && parent1.getLocationInfo().getCodeElementType().equals(CodeElementType.IF_STATEMENT)) {
+				continue;
+			}
+			for(ListIterator<CompositeStatementObject> it2 = innerNodes2.listIterator(); it2.hasNext();) {
+				CompositeStatementObject node2 = it2.next();
+				if(!node2.getLocationInfo().getCodeElementType().equals(CodeElementType.SWITCH_STATEMENT)) {
+					continue;
+				}
+				// Check that the match subject appears in the if condition
+				boolean subjectMatchesCondition = false;
+				if(!node2.getExpressions().isEmpty()) {
+					String matchSubject = node2.getExpressions().get(0).getString();
+					for(AbstractExpression expr : node1.getExpressions()) {
+						if(expr.getString().contains(matchSubject)) {
+							subjectMatchesCondition = true;
+							break;
+						}
+					}
+				}
+				if(subjectMatchesCondition) {
+					Set<AbstractCodeFragment> before = new LinkedHashSet<>();
+					before.add(node1);
+					Set<AbstractCodeFragment> after = new LinkedHashSet<>();
+					after.add(node2);
+					ReplaceConditionalWithPatternMatchingRefactoring ref =
+							new ReplaceConditionalWithPatternMatchingRefactoring(before, after, container1, container2);
+					LeafMapping newMapping = createLeafMapping(node1, node2, new LinkedHashMap<String, String>(), false);
+					newMapping.addRefactoring(ref);
+					addToMappings(newMapping, new TreeSet<>());
+					it1.remove();
+					it2.remove();
+					break;
+				}
+			}
+		}
+	}
+
+	private void detectPatternMatchToIf(List<CompositeStatementObject> innerNodes1, List<CompositeStatementObject> innerNodes2) {
+		if(!container1.getLocationInfo().getFilePath().endsWith(".py")) {
+			return;
+		}
+		for(ListIterator<CompositeStatementObject> it1 = innerNodes1.listIterator(); it1.hasNext();) {
+			CompositeStatementObject node1 = it1.next();
+			if(!node1.getLocationInfo().getCodeElementType().equals(CodeElementType.SWITCH_STATEMENT)) {
+				continue;
+			}
+			for(ListIterator<CompositeStatementObject> it2 = innerNodes2.listIterator(); it2.hasNext();) {
+				CompositeStatementObject node2 = it2.next();
+				if(!node2.getLocationInfo().getCodeElementType().equals(CodeElementType.IF_STATEMENT)) {
+					continue;
+				}
+				// Only consider outermost if-statements on the after-side
+				CompositeStatementObject parent2 = node2.getParent();
+				if(parent2 != null && parent2.getLocationInfo().getCodeElementType().equals(CodeElementType.IF_STATEMENT)) {
+					continue;
+				}
+				// Check that the match subject appears in the if condition
+				boolean subjectMatchesCondition = false;
+				if(!node1.getExpressions().isEmpty()) {
+					String matchSubject = node1.getExpressions().get(0).getString();
+					for(AbstractExpression expr : node2.getExpressions()) {
+						if(expr.getString().contains(matchSubject)) {
+							subjectMatchesCondition = true;
+							break;
+						}
+					}
+				}
+				if(subjectMatchesCondition) {
+					Set<AbstractCodeFragment> before = new LinkedHashSet<>();
+					before.add(node1);
+					Set<AbstractCodeFragment> after = new LinkedHashSet<>();
+					after.add(node2);
+					ReplacePatternMatchingWithConditionalRefactoring ref =
+							new ReplacePatternMatchingWithConditionalRefactoring(before, after, container1, container2);
+					LeafMapping newMapping = createLeafMapping(node1, node2, new LinkedHashMap<String, String>(), false);
+					newMapping.addRefactoring(ref);
+					addToMappings(newMapping, new TreeSet<>());
+					it1.remove();
+					it2.remove();
+					break;
+				}
+			}
 		}
 	}
 

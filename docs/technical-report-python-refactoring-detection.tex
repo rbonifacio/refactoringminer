@@ -1,0 +1,533 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{microtype}
+\usepackage{parskip}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{lmodern}
+
+% --- Python listings style ---
+\definecolor{codebg}{RGB}{248,248,248}
+\definecolor{keyword}{RGB}{0,0,180}
+\definecolor{string}{RGB}{163,21,21}
+\definecolor{comment}{RGB}{0,128,0}
+\definecolor{annotation}{RGB}{130,65,0}
+
+\lstdefinelanguage{Python}{
+  keywords={def,class,return,if,elif,else,match,case,from,import,pass,None,True,False,and,or,not,in,is,for,while,with,as,try,except,finally,raise,lambda,yield,del,assert,break,continue,global,nonlocal},
+  keywordstyle=\color{keyword}\bfseries,
+  sensitive=true,
+  comment=[l]{\#},
+  commentstyle=\color{comment}\itshape,
+  stringstyle=\color{string},
+  morestring=[b]",
+  morestring=[b]',
+}
+
+\lstset{
+  language=Python,
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebg},
+  frame=single,
+  rulecolor=\color{gray!40},
+  framesep=4pt,
+  xleftmargin=6pt,
+  xrightmargin=6pt,
+  showstringspaces=false,
+  tabsize=4,
+  breaklines=true,
+  captionpos=b,
+}
+
+% --- Section formatting ---
+\titleformat{\section}{\large\bfseries}{}{0em}{\thesection\quad}
+\titleformat{\subsection}{\normalsize\bfseries}{}{0em}{\thesubsection\quad}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  urlcolor=blue!60!black,
+}
+
+% --- Inline code ---
+\newcommand{\code}[1]{\texttt{#1}}
+
+\begin{document}
+
+% -----------------------------------------------------------------------
+\begin{titlepage}
+  \centering
+  \vspace*{3cm}
+  {\LARGE\bfseries Technical Report\\[0.5em]
+   Python Refactoring Detection in RefactoringMiner\par}
+  \vspace{1.5cm}
+  {\large Type Hint Annotations and Structural Pattern Matching\par}
+  \vspace{2cm}
+  {\normalsize March 2026\par}
+  \vfill
+\end{titlepage}
+
+% -----------------------------------------------------------------------
+\tableofcontents
+\newpage
+
+% -----------------------------------------------------------------------
+\section{Overview}
+
+This report describes two sets of new refactoring detection capabilities added to RefactoringMiner for Python source code. The changes were implemented across two sessions and introduce eleven new refactoring types: nine related to \textbf{PEP 484/526 type hint annotations} and two related to \textbf{structural pattern matching} (Python~3.10+).
+
+% -----------------------------------------------------------------------
+\section{Motivation}
+
+\subsection{Type Hint Annotations}
+
+Python introduced optional type hints via \href{https://peps.python.org/pep-0484/}{PEP~484} (Python~3.5) and variable annotations via \href{https://peps.python.org/pep-0526/}{PEP~526} (Python~3.6). Since then, two major forces have driven annotation-related changes in real-world Python codebases.
+
+\begin{enumerate}[leftmargin=*, label=\arabic*.]
+  \item \textbf{Gradual typing adoption.} Teams incrementally annotate previously unannotated functions and variables as they mature their codebase or integrate static analysis tools such as mypy, pyright, or Pytype.
+
+  \item \textbf{Modernisation from the \code{typing} module to built-in generics.}
+        \href{https://peps.python.org/pep-0585/}{PEP~585} (Python~3.9) allowed \code{list[int]} instead of \code{typing.List[int]}, and \href{https://peps.python.org/pep-0604/}{PEP~604} (Python~3.10) introduced the \code{X | Y} union syntax as a replacement for \code{typing.Optional[X]} and \code{typing.Union[X, Y]}. Many projects have been migrating to these shorter, import-free forms.
+\end{enumerate}
+
+RefactoringMiner already detected analogous changes in Java (e.g., \emph{Change Parameter Type}). Extending detection to Python type annotations closes this gap and enables empirical studies of typing evolution in Python projects.
+
+\subsection{Structural Pattern Matching}
+
+Python~3.10 introduced structural pattern matching (\code{match}/\code{case}) via \href{https://peps.python.org/pep-0634/}{PEP~634}. It provides a more expressive alternative to long \code{if}/\code{elif}/\code{else} chains when dispatching on the shape or value of data. Developers may migrate in either direction:
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Forward:} replace a chain of equality comparisons with a \code{match} statement when the logic maps cleanly to case patterns.
+  \item \textbf{Backward:} revert a \code{match} statement to a conditional chain, for instance when targeting older Python interpreters or when the conditional form is judged more readable.
+\end{itemize}
+
+Detecting both directions allows researchers and tool authors to study adoption patterns of this language feature in the wild.
+
+% -----------------------------------------------------------------------
+\section{Implemented Refactoring Types}
+
+\subsection{Type Hint Annotation Refactorings}
+
+Table~\ref{tab:annotation-types} lists the nine new \code{RefactoringType} constants introduced for type hint annotations.
+
+\begin{table}[ht]
+  \centering
+  \caption{New refactoring types for Python type hint annotations.}
+  \label{tab:annotation-types}
+  \small
+  \begin{tabular}{@{}ll@{}}
+    \toprule
+    \textbf{Refactoring Type} & \textbf{Trigger} \\
+    \midrule
+    \code{ADD\_PARAMETER\_TYPE\_ANNOTATION}    & A parameter that had no type hint gains one \\
+    \code{REMOVE\_PARAMETER\_TYPE\_ANNOTATION} & A parameter loses its type hint \\
+    \code{CHANGE\_PARAMETER\_TYPE\_ANNOTATION} & A parameter's type hint changes \\
+    \code{ADD\_RETURN\_TYPE\_ANNOTATION}        & A function gains a \code{-> T} return annotation \\
+    \code{REMOVE\_RETURN\_TYPE\_ANNOTATION}     & A function loses its \code{-> T} return annotation \\
+    \code{CHANGE\_RETURN\_TYPE\_ANNOTATION}     & A function's return annotation changes \\
+    \code{ADD\_VARIABLE\_TYPE\_ANNOTATION}      & A local variable or class attribute gains \code{: T} \\
+    \code{REMOVE\_VARIABLE\_TYPE\_ANNOTATION}   & A local variable or class attribute loses its annotation \\
+    \code{CHANGE\_VARIABLE\_TYPE\_ANNOTATION}   & A variable's annotation changes \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Structural Pattern Matching Refactorings}
+
+Table~\ref{tab:pattern-types} lists the two new \code{RefactoringType} constants for structural pattern matching.
+
+\begin{table}[ht]
+  \centering
+  \caption{New refactoring types for structural pattern matching.}
+  \label{tab:pattern-types}
+  \small
+  \begin{tabular}{@{}ll@{}}
+    \toprule
+    \textbf{Refactoring Type} & \textbf{Trigger} \\
+    \midrule
+    \code{REPLACE\_CONDITIONAL\_WITH\_PATTERN\_MATCHING} & An \code{if}/\code{elif}/\code{else} chain is replaced by \code{match}/\code{case} \\
+    \code{REPLACE\_PATTERN\_MATCHING\_WITH\_CONDITIONAL} & A \code{match}/\code{case} statement is replaced by \code{if}/\code{elif}/\code{else} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% -----------------------------------------------------------------------
+\section{Key Examples}
+
+\subsection{Add Parameter and Return Type Annotations}
+
+A function with no type information gains full annotations --- a typical first step when adopting static analysis tooling.
+
+\begin{lstlisting}[caption={Before: unannotated function.}]
+class Calculator:
+    def add(self, x, y):
+        return x + y
+\end{lstlisting}
+
+\begin{lstlisting}[caption={After: fully annotated function.}]
+class Calculator:
+    def add(self, x: int, y: int) -> int:
+        return x + y
+\end{lstlisting}
+
+Detected refactorings:
+\begin{itemize}[leftmargin=*]
+  \item \code{ADD\_PARAMETER\_TYPE\_ANNOTATION} for \code{x} (added \code{: int})
+  \item \code{ADD\_PARAMETER\_TYPE\_ANNOTATION} for \code{y} (added \code{: int})
+  \item \code{ADD\_RETURN\_TYPE\_ANNOTATION} (added \code{-> int})
+\end{itemize}
+
+\subsection{Add Return Type Annotation Only}
+
+A function already has parameter annotations but is missing a return annotation --- a common partial-typing scenario.
+
+\begin{lstlisting}[caption={Before: missing return annotation.}]
+class DataService:
+    def get_name(self):
+        return ""
+\end{lstlisting}
+
+\begin{lstlisting}[caption={After: return annotation added.}]
+class DataService:
+    def get_name(self) -> str:
+        return ""
+\end{lstlisting}
+
+Detected refactoring:
+\begin{itemize}[leftmargin=*]
+  \item \code{ADD\_RETURN\_TYPE\_ANNOTATION} (added \code{-> str})
+\end{itemize}
+
+\subsection{Remove All Type Annotations}
+
+The reverse: all annotations are stripped from a function, for example when removing a static analysis dependency or simplifying a prototype.
+
+\begin{lstlisting}[caption={Before: fully annotated.}]
+class Calculator:
+    def add(self, x: int, y: int) -> int:
+        return x + y
+\end{lstlisting}
+
+\begin{lstlisting}[caption={After: all annotations removed.}]
+class Calculator:
+    def add(self, x, y):
+        return x + y
+\end{lstlisting}
+
+Detected refactorings:
+\begin{itemize}[leftmargin=*]
+  \item \code{REMOVE\_PARAMETER\_TYPE\_ANNOTATION} for \code{x}
+  \item \code{REMOVE\_PARAMETER\_TYPE\_ANNOTATION} for \code{y}
+  \item \code{REMOVE\_RETURN\_TYPE\_ANNOTATION}
+\end{itemize}
+
+\subsection{Change Parameter Type: \texttt{typing} Module to Built-in Generics (PEP~585)}
+
+A common modernisation pattern when dropping support for Python~$<$~3.9.
+
+\begin{lstlisting}[caption={Before: \texttt{typing.List} generics.}]
+from typing import List
+
+class Calculator:
+    def add(self, x: List[int], y: List[int]) -> List[int]:
+        return x + y
+\end{lstlisting}
+
+\begin{lstlisting}[caption={After: built-in \texttt{list} generics (PEP 585).}]
+class Calculator:
+    def add(self, x: list[int], y: list[int]) -> list[int]:
+        return x + y
+\end{lstlisting}
+
+Detected refactorings:
+\begin{itemize}[leftmargin=*]
+  \item \code{CHANGE\_PARAMETER\_TYPE\_ANNOTATION} for \code{x}: \code{List[int]} $\to$ \code{list[int]}
+  \item \code{CHANGE\_PARAMETER\_TYPE\_ANNOTATION} for \code{y}: \code{List[int]} $\to$ \code{list[int]}
+  \item \code{CHANGE\_RETURN\_TYPE\_ANNOTATION}: \code{List[int]} $\to$ \code{list[int]}
+\end{itemize}
+
+\subsection{Change Parameter Type: \texttt{Optional[T]} to \texttt{T | None} (PEP~604)}
+
+\begin{lstlisting}[caption={Before: \texttt{Optional} from \texttt{typing}.}]
+from typing import Optional
+
+class Processor:
+    def process(self, items: Optional[str]):
+        pass
+\end{lstlisting}
+
+\begin{lstlisting}[caption={After: union syntax (PEP 604).}]
+class Processor:
+    def process(self, items: str | None):
+        pass
+\end{lstlisting}
+
+Detected refactoring:
+\begin{itemize}[leftmargin=*]
+  \item \code{CHANGE\_PARAMETER\_TYPE\_ANNOTATION} for \code{items}: \code{Optional[str]} $\to$ \code{str | None}
+\end{itemize}
+
+\subsection{Change Variable Type Annotation --- Class Attribute}
+
+\begin{lstlisting}[caption={Before: class attribute with \texttt{typing.List}.}]
+from typing import List
+
+class Shape:
+    items: List[str] = []
+\end{lstlisting}
+
+\begin{lstlisting}[caption={After: built-in \texttt{list} (PEP 585).}]
+class Shape:
+    items: list[str] = []
+\end{lstlisting}
+
+Detected refactoring:
+\begin{itemize}[leftmargin=*]
+  \item \code{CHANGE\_VARIABLE\_TYPE\_ANNOTATION} for \code{items}: \code{List[str]} $\to$ \code{list[str]}
+\end{itemize}
+
+\subsection{Change Variable Type Annotation --- Local Variable}
+
+\begin{lstlisting}[caption={Before: local variable annotated as \texttt{int}.}]
+class DataProcessor:
+    def process(self):
+        count: int = 0
+        count = count + 1
+        return count
+\end{lstlisting}
+
+\begin{lstlisting}[caption={After: annotation changed to \texttt{float}.}]
+class DataProcessor:
+    def process(self):
+        count: float = 0
+        count = count + 1
+        return count
+\end{lstlisting}
+
+Detected refactoring:
+\begin{itemize}[leftmargin=*]
+  \item \code{CHANGE\_VARIABLE\_TYPE\_ANNOTATION} for \code{count}: \code{int} $\to$ \code{float}
+\end{itemize}
+
+\subsection{Replace Conditional With Pattern Matching --- Simple Value Dispatch}
+
+The canonical motivating case: a chain of equality tests on a single variable is replaced by a \code{match} statement with literal patterns.
+
+\begin{lstlisting}[caption={Before: \texttt{if}/\texttt{elif}/\texttt{else} chain on a string variable.}]
+class ShapeProcessor:
+    def describe(self, shape):
+        if shape == "circle":
+            return "A round shape"
+        elif shape == "square":
+            return "A shape with four equal sides"
+        elif shape == "triangle":
+            return "A shape with three sides"
+        else:
+            return "Unknown shape"
+\end{lstlisting}
+
+\begin{lstlisting}[caption={After: \texttt{match}/\texttt{case} with literal patterns.}]
+class ShapeProcessor:
+    def describe(self, shape):
+        match shape:
+            case "circle":
+                return "A round shape"
+            case "square":
+                return "A shape with four equal sides"
+            case "triangle":
+                return "A shape with three sides"
+            case _:
+                return "Unknown shape"
+\end{lstlisting}
+
+Detected refactoring:
+\begin{itemize}[leftmargin=*]
+  \item \code{REPLACE\_CONDITIONAL\_WITH\_PATTERN\_MATCHING} in function \code{describe} of class \code{ShapeProcessor}
+\end{itemize}
+
+\subsection{Replace Conditional With Pattern Matching --- Guard Clauses}
+
+When at least one \code{case} branch uses an \code{if} guard (e.g., \code{case x if x < 0:}), the resulting code mixes literal patterns and guard-based dispatch. RefactoringMiner detects the refactoring as a single event and does not report the guard conditions as additional refactorings.
+
+\begin{lstlisting}[caption={Before: range checks in an \texttt{if}/\texttt{elif}/\texttt{else} chain.}]
+class Classifier:
+    def classify(self, value):
+        if value < 0:
+            return "negative"
+        elif value == 0:
+            return "zero"
+        elif value < 100:
+            return "small positive"
+        else:
+            return "large positive"
+\end{lstlisting}
+
+\begin{lstlisting}[caption={After: \texttt{match} with guard clauses.}]
+class Classifier:
+    def classify(self, value):
+        match value:
+            case x if x < 0:
+                return "negative"
+            case 0:
+                return "zero"
+            case x if x < 100:
+                return "small positive"
+            case _:
+                return "large positive"
+\end{lstlisting}
+
+Detected refactoring:
+\begin{itemize}[leftmargin=*]
+  \item \code{REPLACE\_CONDITIONAL\_WITH\_PATTERN\_MATCHING} in function \code{classify} of class \code{Classifier}
+\end{itemize}
+
+\subsection{Replace Pattern Matching With Conditional --- Inverse Direction}
+
+The same transformation in reverse. Useful for projects that revert to conditionals for compatibility with Python~3.9 or for readability preferences.
+
+\begin{lstlisting}[caption={Before: \texttt{match}/\texttt{case} dispatch.}]
+class ShapeProcessor:
+    def describe(self, shape):
+        match shape:
+            case "circle":
+                return "A round shape"
+            case "square":
+                return "A shape with four equal sides"
+            case "triangle":
+                return "A shape with three sides"
+            case _:
+                return "Unknown shape"
+\end{lstlisting}
+
+\begin{lstlisting}[caption={After: reverted to \texttt{if}/\texttt{elif}/\texttt{else}.}]
+class ShapeProcessor:
+    def describe(self, shape):
+        if shape == "circle":
+            return "A round shape"
+        elif shape == "square":
+            return "A shape with four equal sides"
+        elif shape == "triangle":
+            return "A shape with three sides"
+        else:
+            return "Unknown shape"
+\end{lstlisting}
+
+Detected refactoring:
+\begin{itemize}[leftmargin=*]
+  \item \code{REPLACE\_PATTERN\_MATCHING\_WITH\_CONDITIONAL} in function \code{describe} of class \code{ShapeProcessor}
+\end{itemize}
+
+% -----------------------------------------------------------------------
+\section{Design and Implementation Notes}
+
+\subsection{Type Annotation Detection}
+
+Detection happens at three distinct AST levels, each handled by a dedicated diff class:
+
+\begin{enumerate}[leftmargin=*, label=\arabic*.]
+  \item \textbf{\code{UMLOperationDiff} --- parameters and return type.}
+        The diff compares matched \code{UMLParameter} objects from the before/after versions of a function and inspects the \code{hasTypeAnnotation} and \code{hasExplicitReturnTypeAnnotation} flags, which are propagated by the Python AST builder (\code{PyDeclarationASTBuilder}).
+
+  \item \textbf{\code{UMLAttributeDiff} --- class-level attributes.}
+        The diff inspects the annotation strings of \code{UMLAttribute} objects from both versions.
+
+  \item \textbf{\code{UMLOperationBodyMapper} --- local variables.}
+        Variable declarations inside function bodies are compared via \code{VariableDeclaration} objects in the \code{VariableReplacementAnalysis} pass.
+\end{enumerate}
+
+Four new refactoring record classes carry the results:
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{\code{AddTypeAnnotationRefactoring}} --- parameterised by \code{RefactoringType} to cover both add and remove cases for parameters and return types.
+  \item \textbf{\code{AddVariableTypeAnnotationRefactoring}} --- covers local variables and class attributes.
+  \item \textbf{\code{ChangeTypeAnnotationRefactoring}} --- captures \code{typeBefore} and \code{typeAfter} for function-level changes.
+  \item \textbf{\code{ChangeVariableTypeAnnotationRefactoring}} --- captures \code{typeBefore} and \code{typeAfter} for variable-level changes.
+\end{itemize}
+
+An important ordering constraint: the CHANGE variants are checked \emph{before} the ADD/REMOVE variants. This prevents a \code{List[int]} $\to$ \code{list[int]} change from being double-reported as a remove followed by an add.
+
+\subsection{Structural Pattern Matching Detection}
+
+The Python AST builder already represents \code{match}/\code{case} as \code{Code\-Element\-Type.\-SWITCH\_STATEMENT} (via \code{LangSwitchStatement}), matching its conceptual equivalence with Java's \code{switch}. The \code{elif} branches are represented as nested \code{LangIfStatement} nodes, giving \code{CodeElementType.IF\_STATEMENT}.
+
+Detection runs inside \code{UMLOperationBodyMapper} as two new private methods:
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{\code{detectIfToPatternMatch}.} Scans unmatched composite nodes from version~1 (\code{IF\_STATEMENT}) and version~2 (\code{SWITCH\_STATEMENT}). For each candidate pair, it applies a \emph{subject-in-condition heuristic}: it checks whether the subject expression of the \code{match} statement (the first expression of the \code{SWITCH} node) appears as a substring of any condition expression of the \code{if} statement. Nested \code{elif} branches are excluded by skipping any \code{IF\_STATEMENT} whose parent is also an \code{IF\_STATEMENT}.
+
+  \item \textbf{\code{detectPatternMatchToIf}.} The exact mirror: scans \code{SWITCH} in version~1 and outermost \code{IF} in version~2, applying the same heuristic.
+\end{itemize}
+
+Both methods are called from two sites in \code{UMLOperationBodyMapper} to cover the two code paths that Python method comparisons can traverse: the direct \code{processInnerNodes} path used by the \code{UMLOperation} constructor, and the \code{processCompositeStatements} path.
+
+% -----------------------------------------------------------------------
+\section{Files Changed}
+
+\subsection{New Production Files}
+
+\begin{table}[ht]
+  \centering
+  \caption{New source files introduced by these changes.}
+  \small
+  \begin{tabular}{@{}ll@{}}
+    \toprule
+    \textbf{Class} & \textbf{Purpose} \\
+    \midrule
+    \code{AddTypeAnnotationRefactoring}               & Add/remove parameter and return annotations \\
+    \code{AddVariableTypeAnnotationRefactoring}        & Add/remove variable annotations \\
+    \code{ChangeTypeAnnotationRefactoring}             & Changed parameter/return annotations \\
+    \code{ChangeVariableTypeAnnotationRefactoring}     & Changed variable annotations \\
+    \code{ReplaceConditionalWithPatternMatchingRefactoring} & Refactoring record for \code{if} $\to$ \code{match} \\
+    \code{ReplacePatternMatchingWithConditionalRefactoring} & Refactoring record for \code{match} $\to$ \code{if} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Modified Production Files}
+
+\begin{table}[ht]
+  \centering
+  \caption{Existing files modified by these changes.}
+  \small
+  \begin{tabular}{@{}ll@{}}
+    \toprule
+    \textbf{File} & \textbf{Change} \\
+    \midrule
+    \code{RefactoringType}              & 11 new enum constants and entries in the \code{ALL} array \\
+    \code{UMLOperationBodyMapper}       & Pattern matching detection; local-variable annotation detection \\
+    \code{UMLOperationDiff}             & Parameter and return annotation add/change/remove detection \\
+    \code{UMLAttributeDiff}             & Class attribute annotation add/change/remove detection \\
+    \code{UMLOperation}                 & \code{hasExplicitReturnTypeAnnotation} flag \\
+    \code{UMLParameter}                 & \code{hasTypeAnnotation} flag \\
+    \code{UMLModelAdapter}              & Propagates annotation flags from AST nodes \\
+    \code{LangMethodDeclaration}        & Stores return annotation presence \\
+    \code{LangSingleVariableDeclaration}& Stores parameter annotation presence \\
+    \code{PyDeclarationASTBuilder}      & Reads annotation presence from the Python parse tree \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{New Test Files}
+
+Eight new JUnit~5 test classes were added, covering approximately 30 scenarios:
+
+\begin{itemize}[leftmargin=*, itemsep=1pt]
+  \item \code{TestAddTypeAnnotationRefactoring}
+  \item \code{TestAddVariableTypeAnnotationRefactoring}
+  \item \code{TestRemoveFunctionTypeAnnotationRefactoring}
+  \item \code{TestRemoveVariableTypeAnnotationRefactoring}
+  \item \code{TestChangeFunctionTypeAnnotationRefactoring}
+  \item \code{TestChangeVariableTypeAnnotationRefactoring}
+  \item \code{TestReplaceConditionalWithPatternMatchingRefactoring}
+  \item \code{TestReplacePatternMatchingWithConditionalRefactoring}
+\end{itemize}
+
+\end{document}

@@ -126,6 +126,8 @@ public enum RefactoringType {
 	REPLACE_GENERIC_WITH_DIAMOND("Replace Generic With Diamond", "Replace Generic With Diamond (.+) with (.+) in method (.+) from class (.+)"),
 	REPLACE_CONDITIONAL_WITH_TERNARY("Replace Conditional With Ternary", "Replace Conditional With Ternary (.+) to (.+) in method (.+) from class (.+)"),
 	REPLACE_CONDITIONAL_WITH_ASSUMPTION("Replace Conditional With Assumption", "Replace Conditional With Assumption (.+) to (.+) in method (.+) from class (.+)"),
+	REPLACE_CONDITIONAL_WITH_PATTERN_MATCHING("Replace Conditional With Pattern Matching", "Replace Conditional With Pattern Matching in (method|function) (.+) from (class|module) (.+)"),
+	REPLACE_PATTERN_MATCHING_WITH_CONDITIONAL("Replace Pattern Matching With Conditional", "Replace Pattern Matching With Conditional in (method|function) (.+) from (class|module) (.+)"),
 	REPLACE_ASSERTION_WITH_ASSUMPTION("Replace Assertion With Assumption", "Replace Assertion With Assumption (.+) to (.+) in method (.+) from class (.+)"),
 	REPLACE_IGNORE_WITH_ASSUMPTION("Replace Ignore With Assumption", "Replace Ignore With Assumption (.+) to (.+) in method (.+) from class (.+)"),
 	EXTRACT_FIXTURE("Extract Fixture", "Extract Fixture (.+) extracted from (.+) in class (.+)");
@@ -248,6 +250,8 @@ public enum RefactoringType {
 		REPLACE_GENERIC_WITH_DIAMOND,
 		REPLACE_CONDITIONAL_WITH_TERNARY,
 		REPLACE_CONDITIONAL_WITH_ASSUMPTION,
+		REPLACE_CONDITIONAL_WITH_PATTERN_MATCHING,
+		REPLACE_PATTERN_MATCHING_WITH_CONDITIONAL,
 		REPLACE_ASSERTION_WITH_ASSUMPTION,
 		REPLACE_IGNORE_WITH_ASSUMPTION,
 		EXTRACT_FIXTURE
