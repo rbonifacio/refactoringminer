@@ -30,6 +30,7 @@ Usage examples
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -87,12 +88,79 @@ def find_jar(explicit_path: str | None) -> Path:
 # JAR invocation
 # ---------------------------------------------------------------------------
 
-def run_jar(jar: Path, jar_args: list[str], json_output: Path) -> None:
+_COMMIT_PROGRESS_RE = re.compile(r'\[Commits:\s*(\d+),')
+
+
+def count_commits(args: argparse.Namespace) -> int | None:
+    """Pre-count commits via git so we can display a percentage."""
+    try:
+        if args.c:
+            return 1
+        if args.bc:
+            repo, start, end = args.bc
+            rev_range = f"{start}..{end}"
+        elif args.bt:
+            repo, start, end = args.bt
+            rev_range = f"{start}..{end}"
+        elif args.a:
+            repo = args.a[0]
+            branch = args.a[1] if len(args.a) > 1 else "HEAD"
+            rev_range = branch
+        else:
+            return None
+        cmd = ["git", "-C", repo, "rev-list", "--count", rev_range]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            return int(result.stdout.strip())
+    except Exception:
+        pass
+    return None
+
+
+def run_jar(jar: Path, jar_args: list[str], json_output: Path,
+            verbose: bool, total: int | None) -> None:
     cmd = ["java", "-jar", str(jar)] + jar_args + ["-json", str(json_output)]
     print(f"[info] Running: {' '.join(cmd)}", file=sys.stderr)
-    result = subprocess.run(cmd)
-    if result.returncode != 0:
-        sys.exit(f"[error] JAR exited with code {result.returncode}")
+
+    if verbose:
+        result = subprocess.run(cmd)
+        if result.returncode != 0:
+            sys.exit(f"[error] JAR exited with code {result.returncode}")
+        return
+
+    # Quiet mode: capture JAR stderr and derive progress from it.
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+    )
+
+    last_pct = -1
+    for line in proc.stderr:
+        m = _COMMIT_PROGRESS_RE.search(line)
+        if m:
+            done = int(m.group(1))
+            if total and total > 0:
+                pct = min(int(done * 100 / total), 99)
+                if pct != last_pct:
+                    print(f"\r  Progress: {pct:3d}% ({done}/{total} commits)",
+                          end="", flush=True, file=sys.stderr)
+                    last_pct = pct
+            else:
+                print(f"\r  Processed: {done} commit(s)",
+                      end="", flush=True, file=sys.stderr)
+
+    proc.wait()
+    if total and total > 0:
+        print(f"\r  Progress: 100% ({total}/{total} commits)",
+              file=sys.stderr)
+    else:
+        print("", file=sys.stderr)  # newline after \r
+
+    if proc.returncode != 0:
+        sys.exit(f"[error] JAR exited with code {proc.returncode}")
 
 # ---------------------------------------------------------------------------
 # Filtering
@@ -178,6 +246,8 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
                    help="Save filtered results as JSON to this file")
     p.add_argument("--all-types", action="store_true",
                    help="Include all refactoring types, not just Python ones")
+    p.add_argument("--verbose", action="store_true",
+                   help="Show full JAR output instead of a progress percentage")
 
     # Mode flags (mutually exclusive)
     mode = p.add_mutually_exclusive_group(required=True)
@@ -214,11 +284,13 @@ def main() -> None:
     args = parse_args()
     jar  = find_jar(args.jar)
 
+    total = None if args.verbose else count_commits(args)
+
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
         tmp_path = Path(tf.name)
 
     try:
-        run_jar(jar, jar_args_for(args), tmp_path)
+        run_jar(jar, jar_args_for(args), tmp_path, args.verbose, total)
 
         with open(tmp_path, encoding="utf-8") as f:
             raw = json.load(f)
