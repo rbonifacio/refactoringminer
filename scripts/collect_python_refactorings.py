@@ -26,8 +26,8 @@ Usage examples
   # Specify a custom JAR location
   python collect_python_refactorings.py --jar /opt/RM-fat.jar -c /path/to/repo abc123
 
-  # Process in batches of 100 commits to avoid OOM
-  python collect_python_refactorings.py -a /path/to/repo main --batch-size 100
+  # Process in batches of 50 commits to avoid OOM (default is 200)
+  python collect_python_refactorings.py -a /path/to/repo main --batch-size 50
 """
 
 import argparse
@@ -92,6 +92,11 @@ def find_jar(explicit_path: str | None) -> Path:
 # ---------------------------------------------------------------------------
 
 _COMMIT_PROGRESS_RE = re.compile(r'\[Commits:\s*(\d+),')
+_OOM_RE = re.compile(r'java\.lang\.OutOfMemoryError')
+
+
+class JarOOMError(RuntimeError):
+    """Raised when the JAR process exits with a Java OutOfMemoryError."""
 
 
 def count_commits(args: argparse.Namespace) -> int | None:
@@ -131,7 +136,7 @@ def get_commit_list(repo: str, rev_range: str) -> list[str]:
 
 def run_jar_once(jar: Path, jar_args: list[str], json_output: Path,
                  verbose: bool, done_so_far: int, total: int | None,
-                 batch_total: int | None, jvm_args: str = "-Xmx4g") -> None:
+                 batch_total: int | None, jvm_args: str = "-Xmx32g") -> None:
     """Invoke the JAR for a single batch and show progress."""
     extra = jvm_args.split() if jvm_args else []
     cmd = ["java"] + extra + ["-jar", str(jar)] + jar_args + ["-json", str(json_output)]
@@ -175,6 +180,9 @@ def run_jar_once(jar: Path, jar_args: list[str], json_output: Path,
     proc.wait()
 
     if proc.returncode != 0:
+        oom = any(_OOM_RE.search(line) for line in captured_lines)
+        if oom:
+            raise JarOOMError("JAR ran out of memory")
         print("[error] JAR output:", file=sys.stderr)
         for line in captured_lines:
             print(" ", line, end="", file=sys.stderr)
@@ -182,10 +190,13 @@ def run_jar_once(jar: Path, jar_args: list[str], json_output: Path,
 
 
 def run_jar(jar: Path, jar_args: list[str], json_output: Path,
-            verbose: bool, total: int | None, jvm_args: str = "-Xmx4g",
+            verbose: bool, total: int | None, jvm_args: str = "-Xmx32g",
             batch_size: int | None = None,
-            args: argparse.Namespace | None = None) -> None:
-    """Run the JAR, optionally splitting into commit batches to avoid OOM."""
+            args: argparse.Namespace | None = None) -> list[str]:
+    """Run the JAR, optionally splitting into commit batches to avoid OOM.
+
+    Returns a (possibly empty) list of commit SHAs that were skipped due to OOM.
+    """
 
     # Determine if batching is applicable and needed
     repo = None
@@ -201,9 +212,8 @@ def run_jar(jar: Path, jar_args: list[str], json_output: Path,
             commits = get_commit_list(repo, f"{start}..{end}")
 
     if commits and batch_size and len(commits) > batch_size:
-        _run_jar_batched(jar, repo, commits, json_output, verbose,
-                         total, jvm_args, batch_size)
-        return
+        return _run_jar_batched(jar, repo, commits, json_output, verbose,
+                                total, jvm_args, batch_size)
 
     # Single invocation (no batching needed or applicable)
     run_jar_once(jar, jar_args, json_output, verbose,
@@ -213,12 +223,20 @@ def run_jar(jar: Path, jar_args: list[str], json_output: Path,
         print(f"\r  Progress: 100% ({total}/{total} commits)", file=sys.stderr)
     elif not verbose:
         print("", file=sys.stderr)
+    return []
 
 
 def _run_jar_batched(jar: Path, repo: str, commits: list[str],
                      final_output: Path, verbose: bool, total: int | None,
-                     jvm_args: str, batch_size: int) -> None:
-    """Split commits into batches of batch_size, merge results into final_output."""
+                     jvm_args: str, batch_size: int,
+                     failed_commits: list[str] | None = None) -> list[str]:
+    """Split commits into batches of batch_size, merge results into final_output.
+
+    Returns the list of commit SHAs skipped due to persistent OOM errors.
+    """
+    if failed_commits is None:
+        failed_commits = []
+
     all_commits_out: list[dict] = []
     n = len(commits)
     done_so_far = 0
@@ -235,10 +253,6 @@ def _run_jar_batched(jar: Path, repo: str, commits: list[str],
               file=sys.stderr)
 
         if start_sha is None:
-            # First batch: use -c for the single first commit, then -bc for rest
-            # Simplest approach: use -bc with empty-tree parent
-            # Actually use -a with a range via bc from root
-            # We'll process the first commit separately then do range
             batch_jar_args = ["-bc", repo, batch[0] + "^", end_sha]
             # If batch[0] has no parent (initial commit), fall back to -c
             check = subprocess.run(
@@ -252,7 +266,8 @@ def _run_jar_batched(jar: Path, repo: str, commits: list[str],
                 else:
                     # Run initial commit separately
                     _run_single_commit_batch(jar, repo, batch[0], all_commits_out,
-                                             verbose, done_so_far, total, jvm_args)
+                                             verbose, done_so_far, total, jvm_args,
+                                             failed_commits)
                     done_so_far += 1
                     if len(batch) > 1:
                         batch_jar_args = ["-bc", repo, batch[0], end_sha]
@@ -267,12 +282,28 @@ def _run_jar_batched(jar: Path, repo: str, commits: list[str],
             tmp_path = Path(tf.name)
 
         try:
-            run_jar_once(jar, batch_jar_args, tmp_path, verbose,
-                         done_so_far=done_so_far, total=total,
-                         batch_total=len(batch), jvm_args=jvm_args)
-            with open(tmp_path, encoding="utf-8") as f:
-                raw = json.load(f)
-            all_commits_out.extend(raw.get("commits", []))
+            try:
+                run_jar_once(jar, batch_jar_args, tmp_path, verbose,
+                             done_so_far=done_so_far, total=total,
+                             batch_total=len(batch), jvm_args=jvm_args)
+                with open(tmp_path, encoding="utf-8") as f:
+                    raw = json.load(f)
+                all_commits_out.extend(raw.get("commits", []))
+            except JarOOMError:
+                if len(batch) == 1:
+                    print(f"\n[warn] Skipping {batch[0][:10]} — OOM on single commit",
+                          file=sys.stderr)
+                    failed_commits.append(batch[0])
+                else:
+                    smaller = max(1, len(batch) // 2)
+                    print(f"\n[warn] OOM on batch of {len(batch)} — retrying as "
+                          f"sub-batches of {smaller}", file=sys.stderr)
+                    tmp_path.unlink(missing_ok=True)
+                    _run_jar_batched(jar, repo, batch, tmp_path, verbose,
+                                     total, jvm_args, smaller, failed_commits)
+                    with open(tmp_path, encoding="utf-8") as f:
+                        raw = json.load(f)
+                    all_commits_out.extend(raw.get("commits", []))
         finally:
             tmp_path.unlink(missing_ok=True)
 
@@ -287,20 +318,28 @@ def _run_jar_batched(jar: Path, repo: str, commits: list[str],
     with open(final_output, "w", encoding="utf-8") as f:
         json.dump({"commits": all_commits_out}, f)
 
+    return failed_commits
+
 
 def _run_single_commit_batch(jar: Path, repo: str, sha: str,
                               all_commits_out: list[dict],
                               verbose: bool, done_so_far: int,
-                              total: int | None, jvm_args: str) -> None:
+                              total: int | None, jvm_args: str,
+                              failed_commits: list[str]) -> None:
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
         tmp_path = Path(tf.name)
     try:
-        run_jar_once(jar, ["-c", repo, sha], tmp_path, verbose,
-                     done_so_far=done_so_far, total=total,
-                     batch_total=1, jvm_args=jvm_args)
-        with open(tmp_path, encoding="utf-8") as f:
-            raw = json.load(f)
-        all_commits_out.extend(raw.get("commits", []))
+        try:
+            run_jar_once(jar, ["-c", repo, sha], tmp_path, verbose,
+                         done_so_far=done_so_far, total=total,
+                         batch_total=1, jvm_args=jvm_args)
+            with open(tmp_path, encoding="utf-8") as f:
+                raw = json.load(f)
+            all_commits_out.extend(raw.get("commits", []))
+        except JarOOMError:
+            print(f"\n[warn] Skipping {sha[:10]} — OOM on single commit",
+                  file=sys.stderr)
+            failed_commits.append(sha)
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -390,8 +429,8 @@ def parse_args() -> argparse.Namespace:
                    help="Include all refactoring types, not just Python ones")
     p.add_argument("--verbose", action="store_true",
                    help="Show full JAR output instead of a progress percentage")
-    p.add_argument("--jvm-args", metavar="ARGS", default="-Xmx4g",
-                   help="JVM arguments passed before -jar (default: -Xmx4g)")
+    p.add_argument("--jvm-args", metavar="ARGS", default="-Xmx32g",
+                   help="JVM arguments passed before -jar (default: -Xmx32g)")
     p.add_argument("--batch-size", metavar="N", type=int, default=200,
                    help="Max commits per JAR invocation to avoid OOM "
                         "(default: 200; use 0 to disable batching)")
@@ -438,8 +477,8 @@ def main() -> None:
         tmp_path = Path(tf.name)
 
     try:
-        run_jar(jar, jar_args_for(args), tmp_path, args.verbose, total,
-                args.jvm_args, batch_size=batch_size, args=args)
+        failed = run_jar(jar, jar_args_for(args), tmp_path, args.verbose, total,
+                         args.jvm_args, batch_size=batch_size, args=args)
 
         with open(tmp_path, encoding="utf-8") as f:
             raw = json.load(f)
@@ -459,6 +498,11 @@ def main() -> None:
             results = filter_refactorings(raw)
 
         print_summary(results)
+
+        if failed:
+            print(f"\n[warn] {len(failed)} commit(s) skipped due to OOM:", file=sys.stderr)
+            for sha in failed:
+                print(f"  {sha}", file=sys.stderr)
 
         if args.output:
             out_path = Path(args.output)
