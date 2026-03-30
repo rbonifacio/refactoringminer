@@ -25,6 +25,9 @@ Usage examples
 
   # Specify a custom JAR location
   python collect_python_refactorings.py --jar /opt/RM-fat.jar -c /path/to/repo abc123
+
+  # Process in batches of 100 commits to avoid OOM
+  python collect_python_refactorings.py -a /path/to/repo main --batch-size 100
 """
 
 import argparse
@@ -117,9 +120,21 @@ def count_commits(args: argparse.Namespace) -> int | None:
     return None
 
 
-def run_jar(jar: Path, jar_args: list[str], json_output: Path,
-            verbose: bool, total: int | None) -> None:
-    cmd = ["java", "-jar", str(jar)] + jar_args + ["-json", str(json_output)]
+def get_commit_list(repo: str, rev_range: str) -> list[str]:
+    """Return commits in chronological order (oldest first)."""
+    cmd = ["git", "-C", repo, "rev-list", "--reverse", rev_range]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        sys.exit(f"[error] git rev-list failed: {result.stderr.strip()}")
+    return [sha for sha in result.stdout.splitlines() if sha]
+
+
+def run_jar_once(jar: Path, jar_args: list[str], json_output: Path,
+                 verbose: bool, done_so_far: int, total: int | None,
+                 batch_total: int | None, jvm_args: str = "-Xmx4g") -> None:
+    """Invoke the JAR for a single batch and show progress."""
+    extra = jvm_args.split() if jvm_args else []
+    cmd = ["java"] + extra + ["-jar", str(jar)] + jar_args + ["-json", str(json_output)]
     print(f"[info] Running: {' '.join(cmd)}", file=sys.stderr)
 
     if verbose:
@@ -128,7 +143,6 @@ def run_jar(jar: Path, jar_args: list[str], json_output: Path,
             sys.exit(f"[error] JAR exited with code {result.returncode}")
         return
 
-    # Quiet mode: capture JAR stderr and derive progress from it.
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.DEVNULL,
@@ -138,29 +152,158 @@ def run_jar(jar: Path, jar_args: list[str], json_output: Path,
     )
 
     last_pct = -1
+    captured_lines: list[str] = []
     for line in proc.stderr:
+        captured_lines.append(line)
         m = _COMMIT_PROGRESS_RE.search(line)
         if m:
-            done = int(m.group(1))
+            batch_done = int(m.group(1))
+            overall_done = done_so_far + batch_done
             if total and total > 0:
-                pct = min(int(done * 100 / total), 99)
+                pct = min(int(overall_done * 100 / total), 99)
                 if pct != last_pct:
-                    print(f"\r  Progress: {pct:3d}% ({done}/{total} commits)",
+                    print(f"\r  Progress: {pct:3d}% ({overall_done}/{total} commits)",
                           end="", flush=True, file=sys.stderr)
                     last_pct = pct
+            elif batch_total:
+                print(f"\r  Processed: {batch_done}/{batch_total} in batch ({overall_done} total)",
+                      end="", flush=True, file=sys.stderr)
             else:
-                print(f"\r  Processed: {done} commit(s)",
+                print(f"\r  Processed: {overall_done} commit(s)",
                       end="", flush=True, file=sys.stderr)
 
     proc.wait()
-    if total and total > 0:
-        print(f"\r  Progress: 100% ({total}/{total} commits)",
-              file=sys.stderr)
-    else:
-        print("", file=sys.stderr)  # newline after \r
 
     if proc.returncode != 0:
+        print("[error] JAR output:", file=sys.stderr)
+        for line in captured_lines:
+            print(" ", line, end="", file=sys.stderr)
         sys.exit(f"[error] JAR exited with code {proc.returncode}")
+
+
+def run_jar(jar: Path, jar_args: list[str], json_output: Path,
+            verbose: bool, total: int | None, jvm_args: str = "-Xmx4g",
+            batch_size: int | None = None,
+            args: argparse.Namespace | None = None) -> None:
+    """Run the JAR, optionally splitting into commit batches to avoid OOM."""
+
+    # Determine if batching is applicable and needed
+    repo = None
+    commits: list[str] = []
+
+    if batch_size and args is not None:
+        if args.a:
+            repo = args.a[0]
+            branch = args.a[1] if len(args.a) > 1 else "HEAD"
+            commits = get_commit_list(repo, branch)
+        elif args.bc:
+            repo, start, end = args.bc
+            commits = get_commit_list(repo, f"{start}..{end}")
+
+    if commits and batch_size and len(commits) > batch_size:
+        _run_jar_batched(jar, repo, commits, json_output, verbose,
+                         total, jvm_args, batch_size)
+        return
+
+    # Single invocation (no batching needed or applicable)
+    run_jar_once(jar, jar_args, json_output, verbose,
+                 done_so_far=0, total=total, batch_total=None, jvm_args=jvm_args)
+
+    if total and total > 0 and not verbose:
+        print(f"\r  Progress: 100% ({total}/{total} commits)", file=sys.stderr)
+    elif not verbose:
+        print("", file=sys.stderr)
+
+
+def _run_jar_batched(jar: Path, repo: str, commits: list[str],
+                     final_output: Path, verbose: bool, total: int | None,
+                     jvm_args: str, batch_size: int) -> None:
+    """Split commits into batches of batch_size, merge results into final_output."""
+    all_commits_out: list[dict] = []
+    n = len(commits)
+    done_so_far = 0
+
+    for batch_start in range(0, n, batch_size):
+        batch = commits[batch_start:batch_start + batch_size]
+        start_sha = commits[batch_start - 1] if batch_start > 0 else None
+        end_sha = batch[-1]
+
+        batch_num = batch_start // batch_size + 1
+        num_batches = (n + batch_size - 1) // batch_size
+        print(f"\n[info] Batch {batch_num}/{num_batches} "
+              f"({len(batch)} commits, {done_so_far}/{n} total done)",
+              file=sys.stderr)
+
+        if start_sha is None:
+            # First batch: use -c for the single first commit, then -bc for rest
+            # Simplest approach: use -bc with empty-tree parent
+            # Actually use -a with a range via bc from root
+            # We'll process the first commit separately then do range
+            batch_jar_args = ["-bc", repo, batch[0] + "^", end_sha]
+            # If batch[0] has no parent (initial commit), fall back to -c
+            check = subprocess.run(
+                ["git", "-C", repo, "rev-parse", batch[0] + "^"],
+                capture_output=True
+            )
+            if check.returncode != 0:
+                # Initial commit — use -c for just this commit, then bc for rest
+                if len(batch) == 1:
+                    batch_jar_args = ["-c", repo, batch[0]]
+                else:
+                    # Run initial commit separately
+                    _run_single_commit_batch(jar, repo, batch[0], all_commits_out,
+                                             verbose, done_so_far, total, jvm_args)
+                    done_so_far += 1
+                    if len(batch) > 1:
+                        batch_jar_args = ["-bc", repo, batch[0], end_sha]
+                    else:
+                        continue
+            else:
+                batch_jar_args = ["-bc", repo, batch[0] + "^", end_sha]
+        else:
+            batch_jar_args = ["-bc", repo, start_sha, end_sha]
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
+            tmp_path = Path(tf.name)
+
+        try:
+            run_jar_once(jar, batch_jar_args, tmp_path, verbose,
+                         done_so_far=done_so_far, total=total,
+                         batch_total=len(batch), jvm_args=jvm_args)
+            with open(tmp_path, encoding="utf-8") as f:
+                raw = json.load(f)
+            all_commits_out.extend(raw.get("commits", []))
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+        done_so_far += len(batch)
+
+    if not verbose:
+        if total and total > 0:
+            print(f"\r  Progress: 100% ({total}/{total} commits)", file=sys.stderr)
+        else:
+            print("", file=sys.stderr)
+
+    with open(final_output, "w", encoding="utf-8") as f:
+        json.dump({"commits": all_commits_out}, f)
+
+
+def _run_single_commit_batch(jar: Path, repo: str, sha: str,
+                              all_commits_out: list[dict],
+                              verbose: bool, done_so_far: int,
+                              total: int | None, jvm_args: str) -> None:
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
+        tmp_path = Path(tf.name)
+    try:
+        run_jar_once(jar, ["-c", repo, sha], tmp_path, verbose,
+                     done_so_far=done_so_far, total=total,
+                     batch_total=1, jvm_args=jvm_args)
+        with open(tmp_path, encoding="utf-8") as f:
+            raw = json.load(f)
+        all_commits_out.extend(raw.get("commits", []))
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
 
 # ---------------------------------------------------------------------------
 # Filtering
@@ -230,13 +373,12 @@ def print_summary(results: list[dict]) -> None:
 # Argument parsing  (mirrors JAR flags directly)
 # ---------------------------------------------------------------------------
 
-def parse_args() -> tuple[argparse.Namespace, list[str]]:
+def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description="Collect Python type-annotation and pattern-matching "
                     "refactorings using RefactoringMiner.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
-        # allow unknown so we can forward -c/-bc/-bt/-a to the JAR arg builder
         add_help=True,
     )
 
@@ -248,6 +390,11 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
                    help="Include all refactoring types, not just Python ones")
     p.add_argument("--verbose", action="store_true",
                    help="Show full JAR output instead of a progress percentage")
+    p.add_argument("--jvm-args", metavar="ARGS", default="-Xmx4g",
+                   help="JVM arguments passed before -jar (default: -Xmx4g)")
+    p.add_argument("--batch-size", metavar="N", type=int, default=200,
+                   help="Max commits per JAR invocation to avoid OOM "
+                        "(default: 200; use 0 to disable batching)")
 
     # Mode flags (mutually exclusive)
     mode = p.add_mutually_exclusive_group(required=True)
@@ -284,13 +431,15 @@ def main() -> None:
     args = parse_args()
     jar  = find_jar(args.jar)
 
+    batch_size = args.batch_size if args.batch_size > 0 else None
     total = None if args.verbose else count_commits(args)
 
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
         tmp_path = Path(tf.name)
 
     try:
-        run_jar(jar, jar_args_for(args), tmp_path, args.verbose, total)
+        run_jar(jar, jar_args_for(args), tmp_path, args.verbose, total,
+                args.jvm_args, batch_size=batch_size, args=args)
 
         with open(tmp_path, encoding="utf-8") as f:
             raw = json.load(f)
