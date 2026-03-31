@@ -363,7 +363,7 @@ def filter_refactorings(raw_json: dict) -> list[dict]:
             all_locs = ref.get("leftSideLocations", []) + ref.get("rightSideLocations", [])
             if not is_python_location(all_locs):
                 continue
-            results.append({
+            entry = {
                 "commit":             commit.get("sha1"),
                 "repository":         commit.get("repository"),
                 "url":                commit.get("url"),
@@ -371,7 +371,12 @@ def filter_refactorings(raw_json: dict) -> list[dict]:
                 "description":        ref.get("description"),
                 "leftSideLocations":  ref.get("leftSideLocations", []),
                 "rightSideLocations": ref.get("rightSideLocations", []),
-            })
+            }
+            if commit.get("authorName") is not None:
+                entry["authorName"]  = commit.get("authorName")
+                entry["authorEmail"] = commit.get("authorEmail")
+                entry["commitTime"]  = commit.get("commitTime")
+            results.append(entry)
     return results
 
 # ---------------------------------------------------------------------------

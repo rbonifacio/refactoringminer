@@ -6,6 +6,9 @@ Each row represents one code location involved in a refactoring.
 Columns:
   - commit_id         : SHA of the commit
   - repository        : repository URL
+  - author_name       : name of the commit author (if available)
+  - author_email      : email of the commit author (if available)
+  - commit_time       : author timestamp in milliseconds since epoch (if available)
   - refactoring_type  : e.g. "Add Variable Type Annotation"
   - description       : human-readable description of the refactoring
   - side              : "left" (before) or "right" (after) the refactoring
@@ -26,6 +29,9 @@ from pathlib import Path
 FIELDNAMES = [
     "commit_id",
     "repository",
+    "author_name",
+    "author_email",
+    "commit_time",
     "refactoring_type",
     "description",
     "side",
@@ -42,6 +48,9 @@ def iter_rows(data: list[dict]):
     for entry in data:
         commit_id = entry.get("commit", "")
         repository = entry.get("repository", "")
+        author_name = entry.get("authorName", "")
+        author_email = entry.get("authorEmail", "")
+        commit_time = entry.get("commitTime", "")
         refactoring_type = entry.get("type", "")
         description = entry.get("description", "")
 
@@ -53,6 +62,9 @@ def iter_rows(data: list[dict]):
                 yield {
                     "commit_id": commit_id,
                     "repository": repository,
+                    "author_name": author_name,
+                    "author_email": author_email,
+                    "commit_time": commit_time,
                     "refactoring_type": refactoring_type,
                     "description": description,
                     "side": side_label,

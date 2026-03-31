@@ -55,6 +55,7 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.eclipse.jgit.errors.MissingObjectException;
 import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.ObjectLoader;
+import org.eclipse.jgit.lib.PersonIdent;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
 import org.eclipse.jgit.revwalk.RevTree;
@@ -216,7 +217,8 @@ public class GitHistoryRefactoringMinerImpl implements GitHistoryRefactoringMine
 			modelDiff = new UMLModelDiff(createModel(Collections.emptyMap(), Collections.emptySet()), createModel(Collections.emptyMap(), Collections.emptySet()));
 			refactoringsAtRevision = Collections.emptyList();
 		}
-		handler.handle(commitId, refactoringsAtRevision);
+		PersonIdent authorIdent = currentCommit.getAuthorIdent();
+		handler.handle(commitId, authorIdent.getName(), authorIdent.getEmailAddress(), authorIdent.getWhen().getTime(), refactoringsAtRevision);
 		handler.handleModelDiff(commitId, refactoringsAtRevision, modelDiff);
 		return refactoringsAtRevision;
 	}

@@ -72,10 +72,14 @@ public class RefactoringMiner {
 				private int commitCount = 0;
 				@Override
 				public void handle(String commitId, List<Refactoring> refactorings) {
+					handle(commitId, null, null, 0, refactorings);
+				}
+				@Override
+				public void handle(String commitId, String authorName, String authorEmail, long commitTime, List<Refactoring> refactorings) {
 					if(commitCount > 0) {
 						betweenCommitsJSON();
 					}
-					commitJSON(gitURL, commitId, refactorings);
+					commitJSON(gitURL, commitId, authorName, authorEmail, commitTime, refactorings);
 					commitCount++;
 				}
 
@@ -116,10 +120,14 @@ public class RefactoringMiner {
 				private int commitCount = 0;
 				@Override
 				public void handle(String commitId, List<Refactoring> refactorings) {
+					handle(commitId, null, null, 0, refactorings);
+				}
+				@Override
+				public void handle(String commitId, String authorName, String authorEmail, long commitTime, List<Refactoring> refactorings) {
 					if(commitCount > 0) {
 						betweenCommitsJSON();
 					}
-					commitJSON(gitURL, commitId, refactorings);
+					commitJSON(gitURL, commitId, authorName, authorEmail, commitTime, refactorings);
 					commitCount++;
 				}
 
@@ -156,10 +164,14 @@ public class RefactoringMiner {
 				private int commitCount = 0;
 				@Override
 				public void handle(String commitId, List<Refactoring> refactorings) {
+					handle(commitId, null, null, 0, refactorings);
+				}
+				@Override
+				public void handle(String commitId, String authorName, String authorEmail, long commitTime, List<Refactoring> refactorings) {
 					if(commitCount > 0) {
 						betweenCommitsJSON();
 					}
-					commitJSON(gitURL, commitId, refactorings);
+					commitJSON(gitURL, commitId, authorName, authorEmail, commitTime, refactorings);
 					commitCount++;
 				}
 
@@ -198,7 +210,11 @@ public class RefactoringMiner {
 			detector.detectAtCommit(repo, commitId, new RefactoringHandler() {
 				@Override
 				public void handle(String commitId, List<Refactoring> refactorings) {
-					commitJSON(gitURL, commitId, refactorings);
+					handle(commitId, null, null, 0, refactorings);
+				}
+				@Override
+				public void handle(String commitId, String authorName, String authorEmail, long commitTime, List<Refactoring> refactorings) {
+					commitJSON(gitURL, commitId, authorName, authorEmail, commitTime, refactorings);
 				}
 
 				@Override
@@ -224,9 +240,13 @@ public class RefactoringMiner {
 		detector.detectAtCommit(gitURL, commitId, new RefactoringHandler() {
 			@Override
 			public void handle(String commitId, List<Refactoring> refactorings) {
+				handle(commitId, null, null, 0, refactorings);
+			}
+			@Override
+			public void handle(String commitId, String authorName, String authorEmail, long commitTime, List<Refactoring> refactorings) {
 				Comparator<Refactoring> comparator = (Refactoring r1, Refactoring r2) -> r1.toString().compareTo(r2.toString());
 				Collections.sort(refactorings, comparator);
-				commitJSON(gitURL, commitId, refactorings);
+				commitJSON(gitURL, commitId, authorName, authorEmail, commitTime, refactorings);
 			}
 
 			@Override
@@ -252,12 +272,16 @@ public class RefactoringMiner {
 			private int commitCount = 0;
 			@Override
 			public void handle(String commitId, List<Refactoring> refactorings) {
+				handle(commitId, null, null, 0, refactorings);
+			}
+			@Override
+			public void handle(String commitId, String authorName, String authorEmail, long commitTime, List<Refactoring> refactorings) {
 				Comparator<Refactoring> comparator = (Refactoring r1, Refactoring r2) -> r1.toString().compareTo(r2.toString());
 				Collections.sort(refactorings, comparator);
 				if(commitCount > 0) {
 					betweenCommitsJSON();
 				}
-				commitJSON(gitURL, commitId, refactorings);
+				commitJSON(gitURL, commitId, authorName, authorEmail, commitTime, refactorings);
 				commitCount++;
 			}
 
@@ -288,7 +312,7 @@ public class RefactoringMiner {
 		return maxArgLength;
 	}
 
-	private static void commitJSON(String cloneURL, String currentCommitId, List<Refactoring> refactoringsAtRevision) {
+	private static void commitJSON(String cloneURL, String currentCommitId, String authorName, String authorEmail, long commitTime, List<Refactoring> refactoringsAtRevision) {
 		if(path != null) {
 			StringBuilder sb = new StringBuilder();
 			sb.append("{").append("\n");
@@ -296,6 +320,11 @@ public class RefactoringMiner {
 			sb.append("\t").append("\"").append("sha1").append("\"").append(": ").append("\"").append(currentCommitId).append("\"").append(",").append("\n");
 			String url = GitHistoryRefactoringMinerImpl.extractCommitURL(cloneURL, currentCommitId);
 			sb.append("\t").append("\"").append("url").append("\"").append(": ").append("\"").append(url).append("\"").append(",").append("\n");
+			if(authorName != null) {
+				sb.append("\t").append("\"").append("authorName").append("\"").append(": ").append("\"").append(authorName).append("\"").append(",").append("\n");
+				sb.append("\t").append("\"").append("authorEmail").append("\"").append(": ").append("\"").append(authorEmail).append("\"").append(",").append("\n");
+				sb.append("\t").append("\"").append("commitTime").append("\"").append(": ").append(commitTime).append(",").append("\n");
+			}
 			sb.append("\t").append("\"").append("refactorings").append("\"").append(": ");
 			sb.append("[");
 			int counter = 0;

@@ -25,11 +25,26 @@ public interface RefactoringHandler {
 	/**
 	 * This method is called after each commit is analyzed.
 	 * You should override this method to do your custom logic with the list of detected refactorings.
-	 * 
+	 *
 	 * @param commitId The sha of the analyzed commit.
 	 * @param refactorings List of refactorings detected in the commit.
 	 */
 	void handle(String commitId, List<Refactoring> refactorings);
+
+	/**
+	 * This method is called after each commit is analyzed, providing additional commit metadata.
+	 * Override this method to access author information alongside the refactorings.
+	 * By default it delegates to {@link #handle(String, List)}.
+	 *
+	 * @param commitId    The sha of the analyzed commit.
+	 * @param authorName  The name of the commit author.
+	 * @param authorEmail The email address of the commit author.
+	 * @param commitTime  The author timestamp in milliseconds since epoch.
+	 * @param refactorings List of refactorings detected in the commit.
+	 */
+	default void handle(String commitId, String authorName, String authorEmail, long commitTime, List<Refactoring> refactorings) {
+		handle(commitId, refactorings);
+	}
 
 	/**
      * This method is called whenever an exception is thrown during the analysis of the given commit.
