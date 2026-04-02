@@ -20,8 +20,8 @@ Usage examples
   # Analyse a range of commits
   python collect_python_refactorings.py -bc /path/to/repo abc123 def456
 
-  # Analyse all commits on a branch and save results to a file
-  python collect_python_refactorings.py -a /path/to/repo main --output results.json
+  # Analyse all commits on a branch (results saved to results/<project>/<project>.json)
+  python collect_python_refactorings.py -a /path/to/repo main
 
   # Specify a custom JAR location
   python collect_python_refactorings.py --jar /opt/RM-fat.jar -c /path/to/repo abc123
@@ -31,12 +31,14 @@ Usage examples
 """
 
 import argparse
+import datetime
 import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -65,6 +67,15 @@ TARGET_TYPES = ANNOTATION_TYPES | PATTERN_MATCHING_TYPES
 # ---------------------------------------------------------------------------
 # JAR discovery
 # ---------------------------------------------------------------------------
+
+_INVALID_UNICODE_ESCAPE = re.compile(r'\\u(?![0-9A-Fa-f]{4})')
+
+def load_json_safe(f) -> dict:
+    """Parse JSON from *f*, stripping invalid \\uXXXX escape sequences first."""
+    raw = f.read()
+    cleaned = _INVALID_UNICODE_ESCAPE.sub(r'\\\\u', raw)
+    return json.loads(cleaned)
+
 
 def find_jar(explicit_path: str | None) -> Path:
     if explicit_path:
@@ -97,6 +108,21 @@ _OOM_RE = re.compile(r'java\.lang\.OutOfMemoryError')
 
 class JarOOMError(RuntimeError):
     """Raised when the JAR process exits with a Java OutOfMemoryError."""
+
+
+class JarTimeoutError(RuntimeError):
+    """Raised when the JAR process exceeds the per-batch timeout."""
+
+
+def _log_err(output_base: Path | None, msg: str) -> None:
+    """Append a timestamped error line to *output_base*.err (no-op if None)."""
+    if output_base is None:
+        return
+    err_file = output_base.with_suffix(".err")
+    err_file.parent.mkdir(parents=True, exist_ok=True)
+    ts = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    with open(err_file, "a", encoding="utf-8") as fh:
+        fh.write(f"[{ts}] {msg}\n")
 
 
 def count_commits(args: argparse.Namespace) -> int | None:
@@ -134,6 +160,9 @@ def get_commit_list(repo: str, rev_range: str) -> list[str]:
     return [sha for sha in result.stdout.splitlines() if sha]
 
 
+_BATCH_TIMEOUT_SECS = 300  # 5 minutes per batch
+
+
 def run_jar_once(jar: Path, jar_args: list[str], json_output: Path,
                  verbose: bool, done_so_far: int, total: int | None,
                  batch_total: int | None, jvm_args: str = "-Xmx32g") -> None:
@@ -143,7 +172,12 @@ def run_jar_once(jar: Path, jar_args: list[str], json_output: Path,
     print(f"[info] Running: {' '.join(cmd)}", file=sys.stderr)
 
     if verbose:
-        result = subprocess.run(cmd)
+        try:
+            result = subprocess.run(cmd, timeout=_BATCH_TIMEOUT_SECS)
+        except subprocess.TimeoutExpired:
+            raise JarTimeoutError(
+                f"JAR timed out after {_BATCH_TIMEOUT_SECS}s"
+            )
         if result.returncode != 0:
             sys.exit(f"[error] JAR exited with code {result.returncode}")
         return
@@ -156,28 +190,38 @@ def run_jar_once(jar: Path, jar_args: list[str], json_output: Path,
         errors="replace",
     )
 
-    last_pct = -1
+    last_pct = [-1]
     captured_lines: list[str] = []
-    for line in proc.stderr:
-        captured_lines.append(line)
-        m = _COMMIT_PROGRESS_RE.search(line)
-        if m:
-            batch_done = int(m.group(1))
-            overall_done = done_so_far + batch_done
-            if total and total > 0:
-                pct = min(int(overall_done * 100 / total), 99)
-                if pct != last_pct:
-                    print(f"\r  Progress: {pct:3d}% ({overall_done}/{total} commits)",
-                          end="", flush=True, file=sys.stderr)
-                    last_pct = pct
-            elif batch_total:
-                print(f"\r  Processed: {batch_done}/{batch_total} in batch ({overall_done} total)",
-                      end="", flush=True, file=sys.stderr)
-            else:
-                print(f"\r  Processed: {overall_done} commit(s)",
-                      end="", flush=True, file=sys.stderr)
 
-    proc.wait()
+    def _read_stderr() -> None:
+        for line in proc.stderr:
+            captured_lines.append(line)
+            m = _COMMIT_PROGRESS_RE.search(line)
+            if m:
+                batch_done = int(m.group(1))
+                overall_done = done_so_far + batch_done
+                if total and total > 0:
+                    pct = min(int(overall_done * 100 / total), 99)
+                    if pct != last_pct[0]:
+                        print(f"\r  Progress: {pct:3d}% ({overall_done}/{total} commits)",
+                              end="", flush=True, file=sys.stderr)
+                        last_pct[0] = pct
+                elif batch_total:
+                    print(f"\r  Processed: {batch_done}/{batch_total} in batch ({overall_done} total)",
+                          end="", flush=True, file=sys.stderr)
+                else:
+                    print(f"\r  Processed: {overall_done} commit(s)",
+                          end="", flush=True, file=sys.stderr)
+
+    reader = threading.Thread(target=_read_stderr, daemon=True)
+    reader.start()
+    try:
+        proc.wait(timeout=_BATCH_TIMEOUT_SECS)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        reader.join(timeout=5)
+        raise JarTimeoutError(f"JAR timed out after {_BATCH_TIMEOUT_SECS}s")
+    reader.join()
 
     if proc.returncode != 0:
         oom = any(_OOM_RE.search(line) for line in captured_lines)
@@ -192,7 +236,8 @@ def run_jar_once(jar: Path, jar_args: list[str], json_output: Path,
 def run_jar(jar: Path, jar_args: list[str], json_output: Path,
             verbose: bool, total: int | None, jvm_args: str = "-Xmx32g",
             batch_size: int | None = None,
-            args: argparse.Namespace | None = None) -> list[str]:
+            args: argparse.Namespace | None = None,
+            output_base: Path | None = None) -> list[str]:
     """Run the JAR, optionally splitting into commit batches to avoid OOM.
 
     Returns a (possibly empty) list of commit SHAs that were skipped due to OOM.
@@ -213,7 +258,7 @@ def run_jar(jar: Path, jar_args: list[str], json_output: Path,
 
     if commits and batch_size and len(commits) > batch_size:
         return _run_jar_batched(jar, repo, commits, json_output, verbose,
-                                total, jvm_args, batch_size)
+                                total, jvm_args, batch_size, output_base=output_base)
 
     # Single invocation (no batching needed or applicable)
     run_jar_once(jar, jar_args, json_output, verbose,
@@ -229,7 +274,8 @@ def run_jar(jar: Path, jar_args: list[str], json_output: Path,
 def _run_jar_batched(jar: Path, repo: str, commits: list[str],
                      final_output: Path, verbose: bool, total: int | None,
                      jvm_args: str, batch_size: int,
-                     failed_commits: list[str] | None = None) -> list[str]:
+                     failed_commits: list[str] | None = None,
+                     output_base: Path | None = None) -> list[str]:
     """Split commits into batches of batch_size, merge results into final_output.
 
     Returns the list of commit SHAs skipped due to persistent OOM errors.
@@ -267,7 +313,7 @@ def _run_jar_batched(jar: Path, repo: str, commits: list[str],
                     # Run initial commit separately
                     _run_single_commit_batch(jar, repo, batch[0], all_commits_out,
                                              verbose, done_so_far, total, jvm_args,
-                                             failed_commits)
+                                             failed_commits, output_base=output_base)
                     done_so_far += 1
                     if len(batch) > 1:
                         batch_jar_args = ["-bc", repo, batch[0], end_sha]
@@ -287,12 +333,13 @@ def _run_jar_batched(jar: Path, repo: str, commits: list[str],
                              done_so_far=done_so_far, total=total,
                              batch_total=len(batch), jvm_args=jvm_args)
                 with open(tmp_path, encoding="utf-8") as f:
-                    raw = json.load(f)
+                    raw = load_json_safe(f)
                 all_commits_out.extend(raw.get("commits", []))
             except JarOOMError:
                 if len(batch) == 1:
-                    print(f"\n[warn] Skipping {batch[0][:10]} — OOM on single commit",
-                          file=sys.stderr)
+                    msg = f"Skipping {batch[0][:10]} — OOM on single commit"
+                    print(f"\n[warn] {msg}", file=sys.stderr)
+                    _log_err(output_base, msg)
                     failed_commits.append(batch[0])
                 else:
                     smaller = max(1, len(batch) // 2)
@@ -300,10 +347,18 @@ def _run_jar_batched(jar: Path, repo: str, commits: list[str],
                           f"sub-batches of {smaller}", file=sys.stderr)
                     tmp_path.unlink(missing_ok=True)
                     _run_jar_batched(jar, repo, batch, tmp_path, verbose,
-                                     total, jvm_args, smaller, failed_commits)
+                                     total, jvm_args, smaller, failed_commits,
+                                     output_base=output_base)
                     with open(tmp_path, encoding="utf-8") as f:
-                        raw = json.load(f)
+                        raw = load_json_safe(f)
                     all_commits_out.extend(raw.get("commits", []))
+            except JarTimeoutError:
+                msg = (f"Skipping batch of {len(batch)} commits "
+                       f"— timed out after {_BATCH_TIMEOUT_SECS}s "
+                       f"(last: {batch[-1][:10]})")
+                print(f"\n[warn] {msg}", file=sys.stderr)
+                _log_err(output_base, msg)
+                failed_commits.extend(batch)
         finally:
             tmp_path.unlink(missing_ok=True)
 
@@ -325,7 +380,8 @@ def _run_single_commit_batch(jar: Path, repo: str, sha: str,
                               all_commits_out: list[dict],
                               verbose: bool, done_so_far: int,
                               total: int | None, jvm_args: str,
-                              failed_commits: list[str]) -> None:
+                              failed_commits: list[str],
+                              output_base: Path | None = None) -> None:
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
         tmp_path = Path(tf.name)
     try:
@@ -337,8 +393,9 @@ def _run_single_commit_batch(jar: Path, repo: str, sha: str,
                 raw = json.load(f)
             all_commits_out.extend(raw.get("commits", []))
         except JarOOMError:
-            print(f"\n[warn] Skipping {sha[:10]} — OOM on single commit",
-                  file=sys.stderr)
+            msg = f"Skipping {sha[:10]} — OOM on single commit"
+            print(f"\n[warn] {msg}", file=sys.stderr)
+            _log_err(output_base, msg)
             failed_commits.append(sha)
     finally:
         tmp_path.unlink(missing_ok=True)
@@ -428,8 +485,6 @@ def parse_args() -> argparse.Namespace:
 
     p.add_argument("--jar", metavar="PATH",
                    help="Path to RM-fat.jar (auto-detected if omitted)")
-    p.add_argument("--output", metavar="FILE",
-                   help="Save filtered results as JSON to this file")
     p.add_argument("--all-types", action="store_true",
                    help="Include all refactoring types, not just Python ones")
     p.add_argument("--verbose", action="store_true",
@@ -471,6 +526,14 @@ def jar_args_for(args: argparse.Namespace) -> list[str]:
 # Main
 # ---------------------------------------------------------------------------
 
+def _repo_from_args(args: argparse.Namespace) -> str:
+    for attr in ("c", "bc", "bt", "a"):
+        val = getattr(args, attr, None)
+        if val:
+            return val[0]
+    return ""
+
+
 def main() -> None:
     args = parse_args()
     jar  = find_jar(args.jar)
@@ -478,12 +541,17 @@ def main() -> None:
     batch_size = args.batch_size if args.batch_size > 0 else None
     total = None if args.verbose else count_commits(args)
 
+    repo = _repo_from_args(args)
+    project_name = Path(repo).name if repo else "unknown"
+    output_base = Path("results") / project_name / project_name
+
     with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
         tmp_path = Path(tf.name)
 
     try:
         failed = run_jar(jar, jar_args_for(args), tmp_path, args.verbose, total,
-                         args.jvm_args, batch_size=batch_size, args=args)
+                         args.jvm_args, batch_size=batch_size, args=args,
+                         output_base=output_base)
 
         with open(tmp_path, encoding="utf-8") as f:
             raw = json.load(f)
@@ -505,15 +573,18 @@ def main() -> None:
         print_summary(results)
 
         if failed:
-            print(f"\n[warn] {len(failed)} commit(s) skipped due to OOM:", file=sys.stderr)
+            print(f"\n[warn] {len(failed)} commit(s) skipped:", file=sys.stderr)
             for sha in failed:
                 print(f"  {sha}", file=sys.stderr)
+            _log_err(output_base, f"Total skipped commits: {len(failed)}")
+            for sha in failed:
+                _log_err(output_base, f"  skipped {sha}")
 
-        if args.output:
-            out_path = Path(args.output)
-            with open(out_path, "w", encoding="utf-8") as f:
-                json.dump(results, f, indent=2)
-            print(f"\n[info] Results saved to {out_path}")
+        out_path = output_base.with_suffix(".json")
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2)
+        print(f"\n[info] Results saved to {out_path}")
 
     finally:
         tmp_path.unlink(missing_ok=True)

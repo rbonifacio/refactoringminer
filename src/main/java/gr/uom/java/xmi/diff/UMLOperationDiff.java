@@ -319,6 +319,24 @@ public class UMLOperationDiff {
 		return sb.toString();
 	}
 
+	public Set<Refactoring> getRefactoringsSuppressingAnnotationsOnRename() {
+		Set<Refactoring> refactorings = getRefactorings();
+		if (!operationRenamed) {
+			return refactorings;
+		}
+		Set<Refactoring> filtered = new LinkedHashSet<>();
+		for (Refactoring r : refactorings) {
+			RefactoringType type = r.getRefactoringType();
+			if (!type.equals(RefactoringType.ADD_RETURN_TYPE_ANNOTATION) &&
+				!type.equals(RefactoringType.REMOVE_RETURN_TYPE_ANNOTATION) &&
+				!type.equals(RefactoringType.ADD_PARAMETER_TYPE_ANNOTATION) &&
+				!type.equals(RefactoringType.REMOVE_PARAMETER_TYPE_ANNOTATION)) {
+				filtered.add(r);
+			}
+		}
+		return filtered;
+	}
+
 	public Set<Refactoring> getRefactorings() {
 		Set<Refactoring> refactorings = new LinkedHashSet<Refactoring>();
 		if(returnTypeChanged || qualifiedReturnTypeChanged && removedOperation instanceof UMLOperation && addedOperation instanceof UMLOperation) {

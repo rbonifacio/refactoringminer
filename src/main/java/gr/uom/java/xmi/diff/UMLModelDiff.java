@@ -4625,7 +4625,7 @@ public class UMLModelDiff {
 									RenameOperationRefactoring refactoring = new RenameOperationRefactoring(removedOperation, addedOperation);
 									refactorings.add(refactoring);
 								}
-								Set<Refactoring> signatureRefactorings = operationSignatureDiff.getRefactorings();
+								Set<Refactoring> signatureRefactorings = operationSignatureDiff.getRefactoringsSuppressingAnnotationsOnRename();
 								refactorings.addAll(signatureRefactorings);
 							}
 						}
@@ -4663,7 +4663,7 @@ public class UMLModelDiff {
 												ref = new MoveOperationRefactoring(operationBodyMapper);
 											inferredMoveOperationRefactorings.add(ref);
 											UMLOperationDiff operationSignatureDiff = operationBodyMapper.getOperationSignatureDiff().get();
-											Set<Refactoring> signatureRefactorings = operationSignatureDiff.getRefactorings();
+											Set<Refactoring> signatureRefactorings = operationSignatureDiff.getRefactoringsSuppressingAnnotationsOnRename();
 											inferredMoveOperationRefactorings.addAll(signatureRefactorings);
 											classDiff.getRemovedOperations().remove(previous);
 										}
@@ -4692,7 +4692,7 @@ public class UMLModelDiff {
 												ref = new MoveOperationRefactoring(operationBodyMapper);
 											inferredMoveOperationRefactorings.add(ref);
 											UMLOperationDiff operationSignatureDiff = operationBodyMapper.getOperationSignatureDiff().get();
-											Set<Refactoring> signatureRefactorings = operationSignatureDiff.getRefactorings();
+											Set<Refactoring> signatureRefactorings = operationSignatureDiff.getRefactoringsSuppressingAnnotationsOnRename();
 											inferredMoveOperationRefactorings.addAll(signatureRefactorings);
 											classDiff.getRemovedOperations().remove(next);
 										}
@@ -4925,7 +4925,7 @@ public class UMLModelDiff {
 								RenameOperationRefactoring refactoring = new RenameOperationRefactoring(removedOperation, addedOperation);
 								refactorings.add(refactoring);
 							}
-							Set<Refactoring> signatureRefactorings = operationSignatureDiff.getRefactorings();
+							Set<Refactoring> signatureRefactorings = operationSignatureDiff.getRefactoringsSuppressingAnnotationsOnRename();
 							refactorings.addAll(signatureRefactorings);
 							if(signatureRefactorings.isEmpty()) {
 								inferRefactoringsFromMatchingMappers(mappers, operationSignatureDiff, refactorings);
@@ -4991,7 +4991,7 @@ public class UMLModelDiff {
 									RenameOperationRefactoring refactoring = new RenameOperationRefactoring(removedOperation, addedOperation);
 									refactorings.add(refactoring);
 								}
-								Set<Refactoring> signatureRefactorings = operationSignatureDiff.getRefactorings();
+								Set<Refactoring> signatureRefactorings = operationSignatureDiff.getRefactoringsSuppressingAnnotationsOnRename();
 								refactorings.addAll(signatureRefactorings);
 							}
 						}
@@ -5016,7 +5016,7 @@ public class UMLModelDiff {
 						RenameOperationRefactoring refactoring = new RenameOperationRefactoring(removedOperation, addedOperation);
 						refactorings.add(refactoring);
 					}
-					Set<Refactoring> signatureRefactorings = operationSignatureDiff.getRefactorings();
+					Set<Refactoring> signatureRefactorings = operationSignatureDiff.getRefactoringsSuppressingAnnotationsOnRename();
 					refactorings.addAll(signatureRefactorings);
 				}
 			}

@@ -2228,7 +2228,7 @@ public abstract class UMLClassBaseDiff extends UMLAbstractClassDiff implements C
 								removedOperationIterator.remove();
 			
 								UMLOperationDiff operationSignatureDiff = new UMLOperationDiff(removedOperation, addedOperation, this);
-								refactorings.addAll(operationSignatureDiff.getRefactorings());
+								refactorings.addAll(operationSignatureDiff.getRefactoringsSuppressingAnnotationsOnRename());
 								if(!removedOperation.getName().equals(addedOperation.getName()) &&
 										!(removedOperation.isConstructor() && addedOperation.isConstructor())) {
 									RenameOperationRefactoring rename = new RenameOperationRefactoring(removedOperation, addedOperation);
@@ -4477,7 +4477,7 @@ public abstract class UMLClassBaseDiff extends UMLAbstractClassDiff implements C
 							UMLOperationBodyMapper operationBodyMapper = new UMLOperationBodyMapper(removedOperation, addedOperation, this);
 							this.addOperationBodyMapper(operationBodyMapper);
 							UMLOperationDiff operationSignatureDiff = operationBodyMapper.getOperationSignatureDiff().get();
-							refactorings.addAll(operationSignatureDiff.getRefactorings());
+							refactorings.addAll(operationSignatureDiff.getRefactoringsSuppressingAnnotationsOnRename());
 							if(!removedOperation.getName().equals(addedOperation.getName()) &&
 									!(removedOperation.isConstructor() && addedOperation.isConstructor())) {
 								RenameOperationRefactoring rename = new RenameOperationRefactoring(removedOperation, addedOperation);
