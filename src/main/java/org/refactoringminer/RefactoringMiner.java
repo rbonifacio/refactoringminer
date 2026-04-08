@@ -10,6 +10,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
+import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import gui.webdiff.DiffDriver;
 import org.eclipse.jgit.lib.Repository;
 import org.refactoringminer.api.GitHistoryRefactoringMiner;
@@ -314,6 +315,7 @@ public class RefactoringMiner {
 
 	private static void commitJSON(String cloneURL, String currentCommitId, String authorName, String authorEmail, long commitTime, List<Refactoring> refactoringsAtRevision) {
 		if(path != null) {
+			JsonStringEncoder encoder = JsonStringEncoder.getInstance();
 			StringBuilder sb = new StringBuilder();
 			sb.append("{").append("\n");
 			sb.append("\t").append("\"").append("repository").append("\"").append(": ").append("\"").append(cloneURL).append("\"").append(",").append("\n");
@@ -321,8 +323,12 @@ public class RefactoringMiner {
 			String url = GitHistoryRefactoringMinerImpl.extractCommitURL(cloneURL, currentCommitId);
 			sb.append("\t").append("\"").append("url").append("\"").append(": ").append("\"").append(url).append("\"").append(",").append("\n");
 			if(authorName != null) {
-				sb.append("\t").append("\"").append("authorName").append("\"").append(": ").append("\"").append(authorName).append("\"").append(",").append("\n");
-				sb.append("\t").append("\"").append("authorEmail").append("\"").append(": ").append("\"").append(authorEmail).append("\"").append(",").append("\n");
+				sb.append("\t").append("\"").append("authorName").append("\"").append(": ").append("\"");
+				encoder.quoteAsString(authorName, sb);
+				sb.append("\"").append(",").append("\n");
+				sb.append("\t").append("\"").append("authorEmail").append("\"").append(": ").append("\"");
+				encoder.quoteAsString(authorEmail, sb);
+				sb.append("\"").append(",").append("\n");
 				sb.append("\t").append("\"").append("commitTime").append("\"").append(": ").append(commitTime).append(",").append("\n");
 			}
 			sb.append("\t").append("\"").append("refactorings").append("\"").append(": ");
