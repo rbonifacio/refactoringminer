@@ -154,7 +154,7 @@ def run_project(project: Path, output_dir: Path) -> bool:
         sys.executable,
         str(_COLLECT_SCRIPT),
         *range_args,
-        "--jvm-args", _JVM_ARGS,
+        f"--jvm-args={_JVM_ARGS}",
         "--batch-size", str(_BATCH_SIZE),
     ]
 
