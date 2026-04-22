@@ -71,10 +71,18 @@ TARGET_TYPES = ANNOTATION_TYPES | PATTERN_MATCHING_TYPES
 _INVALID_UNICODE_ESCAPE = re.compile(r'\\u(?![0-9A-Fa-f]{4})')
 
 def load_json_safe(f) -> dict:
-    """Parse JSON from *f*, stripping invalid \\uXXXX escape sequences first."""
+    """Parse JSON from *f*, fixing known bad escape sequences.
+
+    Falls back to strict=False (allows literal control chars in strings) when
+    standard parsing fails — guards against unescaped newlines/tabs that the
+    JAR may embed in code-element strings.
+    """
     raw = f.read()
     cleaned = _INVALID_UNICODE_ESCAPE.sub(r'\\\\u', raw)
-    return json.loads(cleaned)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        return json.JSONDecoder(strict=False).decode(cleaned)
 
 
 def find_jar(explicit_path: str | None) -> Path:
