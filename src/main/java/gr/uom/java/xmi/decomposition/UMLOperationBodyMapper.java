@@ -2129,12 +2129,22 @@ public class UMLOperationBodyMapper implements Comparable<UMLOperationBodyMapper
 		if(!container1.getLocationInfo().getFilePath().endsWith(".py")) {
 			return;
 		}
+		// Tracks elif-branch nodes consumed by a previously matched outer if, so they can be
+		// removed from innerNodes1 as the iterator encounters them (avoids ConcurrentModificationException).
+		Set<CompositeStatementObject> elifBranchesToRemove = new LinkedHashSet<>();
 		for(ListIterator<CompositeStatementObject> it1 = innerNodes1.listIterator(); it1.hasNext();) {
 			CompositeStatementObject node1 = it1.next();
+			// Remove elif branches that were part of a previously matched outer if.
+			if(elifBranchesToRemove.remove(node1)) {
+				it1.remove();
+				continue;
+			}
 			if(!node1.getLocationInfo().getCodeElementType().equals(CodeElementType.IF_STATEMENT)) {
 				continue;
 			}
-			// Only consider outermost if-statements (parent is not another if-statement)
+			// Only consider outermost if-statements (parent is not another if-statement).
+			// Elif branches have the outer IF as their direct parent; nested ifs inside a branch
+			// body always go through an intermediate BLOCK and are therefore not skipped here.
 			CompositeStatementObject parent1 = node1.getParent();
 			if(parent1 != null && parent1.getLocationInfo().getCodeElementType().equals(CodeElementType.IF_STATEMENT)) {
 				continue;
@@ -2158,6 +2168,9 @@ public class UMLOperationBodyMapper implements Comparable<UMLOperationBodyMapper
 				if(subjectMatchesCondition) {
 					Set<AbstractCodeFragment> before = new LinkedHashSet<>();
 					before.add(node1);
+					// Collect all elif branches so the refactoring spans the full chain and the
+					// branches are not left as spuriously unmatched nodes.
+					collectElifChain(node1, before, elifBranchesToRemove);
 					Set<AbstractCodeFragment> after = new LinkedHashSet<>();
 					after.add(node2);
 					ReplaceConditionalWithPatternMatchingRefactoring ref =
@@ -2182,12 +2195,13 @@ public class UMLOperationBodyMapper implements Comparable<UMLOperationBodyMapper
 			if(!node1.getLocationInfo().getCodeElementType().equals(CodeElementType.SWITCH_STATEMENT)) {
 				continue;
 			}
+			Set<CompositeStatementObject> matchedElifs = new LinkedHashSet<>();
 			for(ListIterator<CompositeStatementObject> it2 = innerNodes2.listIterator(); it2.hasNext();) {
 				CompositeStatementObject node2 = it2.next();
 				if(!node2.getLocationInfo().getCodeElementType().equals(CodeElementType.IF_STATEMENT)) {
 					continue;
 				}
-				// Only consider outermost if-statements on the after-side
+				// Only consider outermost if-statements on the after-side.
 				CompositeStatementObject parent2 = node2.getParent();
 				if(parent2 != null && parent2.getLocationInfo().getCodeElementType().equals(CodeElementType.IF_STATEMENT)) {
 					continue;
@@ -2208,6 +2222,8 @@ public class UMLOperationBodyMapper implements Comparable<UMLOperationBodyMapper
 					before.add(node1);
 					Set<AbstractCodeFragment> after = new LinkedHashSet<>();
 					after.add(node2);
+					// Collect all elif branches so the refactoring spans the full chain.
+					collectElifChain(node2, after, matchedElifs);
 					ReplacePatternMatchingWithConditionalRefactoring ref =
 							new ReplacePatternMatchingWithConditionalRefactoring(before, after, container1, container2);
 					LeafMapping newMapping = createLeafMapping(node1, node2, new LinkedHashMap<String, String>(), false);
@@ -2216,6 +2232,31 @@ public class UMLOperationBodyMapper implements Comparable<UMLOperationBodyMapper
 					it1.remove();
 					it2.remove();
 					break;
+				}
+			}
+			// Remove elif branches of a matched outer if outside the iterator to avoid
+			// ConcurrentModificationException on innerNodes2.
+			if(!matchedElifs.isEmpty()) {
+				innerNodes2.removeAll(matchedElifs);
+			}
+		}
+	}
+
+	/**
+	 * Recursively collects direct IF_STATEMENT children (elif branches) of {@code ifNode}
+	 * into {@code fragments} and {@code elifSet}.  Nested ifs inside branch bodies are
+	 * never direct IF_STATEMENT children (they sit behind an intermediate BLOCK node) and
+	 * are therefore not affected.
+	 */
+	private void collectElifChain(CompositeStatementObject ifNode,
+			Set<AbstractCodeFragment> fragments,
+			Set<CompositeStatementObject> elifSet) {
+		for(AbstractStatement stmt : ifNode.getStatements()) {
+			if(stmt instanceof CompositeStatementObject child) {
+				if(child.getLocationInfo().getCodeElementType().equals(CodeElementType.IF_STATEMENT)) {
+					fragments.add(child);
+					elifSet.add(child);
+					collectElifChain(child, fragments, elifSet);
 				}
 			}
 		}

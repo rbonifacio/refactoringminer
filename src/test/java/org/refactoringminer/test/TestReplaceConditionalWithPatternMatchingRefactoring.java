@@ -87,6 +87,23 @@ public class TestReplaceConditionalWithPatternMatchingRefactoring {
     }
 
     /**
+     * Scenario 4: if/elif/else where one branch contains a nested if -> match/case
+     * The nested if inside a branch body must not prevent detection of the outer chain,
+     * and the elif branches must be included in the refactoring (not left unmatched).
+     * Expected: exactly 1 REPLACE_CONDITIONAL_WITH_PATTERN_MATCHING
+     */
+    @Test
+    public void testIfElifWithNestedIfReplacedByMatch() throws Exception {
+        List<Refactoring> refactorings = detect("scenario4", "nested.py");
+
+        List<Refactoring> matches = refactorings.stream()
+                .filter(r -> r.getRefactoringType() == RefactoringType.REPLACE_CONDITIONAL_WITH_PATTERN_MATCHING)
+                .collect(Collectors.toList());
+
+        assertEquals(1, matches.size(), "Expected exactly 1 REPLACE_CONDITIONAL_WITH_PATTERN_MATCHING when if/elif contains a nested if");
+    }
+
+    /**
      * No refactoring when before and after are identical (scenario1/before used for both).
      * Expected: 0 REPLACE_CONDITIONAL_WITH_PATTERN_MATCHING
      */
