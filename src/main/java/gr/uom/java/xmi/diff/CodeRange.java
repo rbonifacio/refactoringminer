@@ -99,26 +99,19 @@ public class CodeRange {
 		encodeIntProperty(sb, "endColumn", endColumn, false);
 		encodeStringProperty(sb, "codeElementType", codeElementType.name(), false);
 		encodeStringProperty(sb, "description", description, false);
-		encodeStringProperty(sb, "codeElement", escapeQuotes(codeElement), true);
+		encodeStringProperty(sb, "codeElement", codeElement, true);
 		sb.append("}");
 		return sb.toString();
 	}
 
-	private String escapeQuotes(String s) {
-		if(s != null) {
-			StringBuilder sb = new StringBuilder();
-			JsonStringEncoder encoder = JsonStringEncoder.getInstance();
-			encoder.quoteAsString(s, sb);
-			return sb.toString();
-		}
-		return s;
-	}
-
 	private void encodeStringProperty(StringBuilder sb, String propertyName, String value, boolean last) {
-		if(value != null)
-			sb.append("\t").append("\t").append("\"" + propertyName + "\"" + ": " + "\"" + value + "\"");
-		else
-			sb.append("\t").append("\t").append("\"" + propertyName + "\"" + ": " + value);
+		if(value != null) {
+			sb.append("\t").append("\t").append("\"").append(propertyName).append("\": \"");
+			JsonStringEncoder.getInstance().quoteAsString(value, sb);
+			sb.append("\"");
+		} else {
+			sb.append("\t").append("\t").append("\"").append(propertyName).append("\": null");
+		}
 		insertNewLine(sb, last);
 	}
 
