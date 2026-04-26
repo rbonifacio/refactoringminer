@@ -5741,6 +5741,16 @@ public class UMLOperationBodyMapper implements Comparable<UMLOperationBodyMapper
 					(innerNodes1.contains(mapping.getFragment1()) || duplicateMapping1(mapping)) && (innerNodes2.contains(mapping.getFragment2()) || duplicateMapping2(mapping))) {
 				CompositeStatementObject comp1 = (CompositeStatementObject) mapping.getFragment1();
 				CompositeStatementObject comp2 = (CompositeStatementObject) mapping.getFragment2();
+				if(container1.getLocationInfo().getFilePath().endsWith(".py")) {
+					boolean ifToSwitch = comp1.getLocationInfo().getCodeElementType().equals(CodeElementType.IF_STATEMENT) &&
+							comp2.getLocationInfo().getCodeElementType().equals(CodeElementType.SWITCH_STATEMENT);
+					boolean switchToIf = comp1.getLocationInfo().getCodeElementType().equals(CodeElementType.SWITCH_STATEMENT) &&
+							comp2.getLocationInfo().getCodeElementType().equals(CodeElementType.IF_STATEMENT);
+					if(ifToSwitch || switchToIf) {
+						removeMapping(mapping);
+						continue;
+					}
+				}
 				innerNodes1.remove(comp1);
 				innerNodes2.remove(comp2);
 				if(comp1.getStatements().size() == 1 && comp2.getStatements().size() == 1) {
@@ -5915,8 +5925,22 @@ public class UMLOperationBodyMapper implements Comparable<UMLOperationBodyMapper
 		processInnerNodes(finalInnerNodes1, finalInnerNodes2, leaves1, leaves2, parameterToArgumentMap, removedOperations, addedOperations, tryWithResourceMigration, containsCallToExtractedMethod, map1, map2);
 		List<AbstractCodeMapping> mappings = new ArrayList<>(this.mappings);
 		for(int i = numberOfMappings; i < mappings.size(); i++) {
-			innerNodes1.remove(mappings.get(i).getFragment1());
-			innerNodes2.remove(mappings.get(i).getFragment2());
+			AbstractCodeMapping m = mappings.get(i);
+			if(container1.getLocationInfo().getFilePath().endsWith(".py") &&
+					m.getFragment1() instanceof CompositeStatementObject && m.getFragment2() instanceof CompositeStatementObject) {
+				CompositeStatementObject mComp1 = (CompositeStatementObject) m.getFragment1();
+				CompositeStatementObject mComp2 = (CompositeStatementObject) m.getFragment2();
+				boolean ifToSwitch = mComp1.getLocationInfo().getCodeElementType().equals(CodeElementType.IF_STATEMENT) &&
+						mComp2.getLocationInfo().getCodeElementType().equals(CodeElementType.SWITCH_STATEMENT);
+				boolean switchToIf = mComp1.getLocationInfo().getCodeElementType().equals(CodeElementType.SWITCH_STATEMENT) &&
+						mComp2.getLocationInfo().getCodeElementType().equals(CodeElementType.IF_STATEMENT);
+				if(ifToSwitch || switchToIf) {
+					removeMapping(m);
+					continue;
+				}
+			}
+			innerNodes1.remove(m.getFragment1());
+			innerNodes2.remove(m.getFragment2());
 		}
 	}
 
